@@ -37,7 +37,38 @@ Use the **Script generator** tab to produce an `az` collector, run it in Azure C
 
 `Microsoft.Compute` / `Microsoft.Network` usages, `Microsoft.Quota` (quotas, usages, quotaRequests), `Microsoft.Compute/skus` for VM availability & restrictions, and `Microsoft.ResourceGraph` for region detection — all on `management.azure.com`.
 
+## API calls & permissions (read-only)
+
+Every call this tool makes is **read-only** — it never creates, modifies, or deletes anything in Azure. There are **no `PUT` / `PATCH` / `DELETE`** operations and no writes of any kind; the only `POST`s are Azure Resource Graph **queries** (KQL reads). A **Reader** role is sufficient, which by Azure RBAC makes it *incapable* of changing your environment.
+
+| # | HTTP | Endpoint | Reads | When |
+|---|------|----------|-------|------|
+| 1 | GET | `/subscriptions/{sub}` | Subscription display name | Always (once per sub) |
+| 2 | GET | `…/Microsoft.Compute/locations/{region}/usages` | Compute usage vs. limits | If "Compute usages" is enabled |
+| 3 | GET | `…/Microsoft.Network/locations/{region}/usages` | Network usage vs. limits | If "Network usages" is enabled |
+| 4 | POST | `…/Microsoft.ResourceGraph/resources` | KQL query listing which regions have resources | Only when regions are left unselected (auto-detect) |
+| 5 | GET | `…/Microsoft.Quota/quotas` | Quota limits | If "Microsoft.Quota" is enabled |
+| 6 | GET | `…/Microsoft.Quota/usages` | Quota usages | If "Microsoft.Quota" is enabled |
+| 7 | GET | `…/Microsoft.Quota/quotaRequests` | Existing quota-increase requests | If "Microsoft.Quota" is enabled |
+| 8 | GET | `…/Microsoft.Compute/skus?$filter=location eq '{region}'` | VM sizes + restrictions in a region | If "SKU availability" is enabled |
+| 9 | GET | `…/Microsoft.Compute/skus` | VM sizes across all regions | If "SKU availability" is enabled |
+| 10 | GET | `/subscriptions/{sub}/locations` | Logical→physical availability-zone mapping | Always (once per sub) |
+| 11 | POST | `…/Microsoft.ResourceGraph/resources` | KQL query listing deployed VMs / disks / public IPs | Only if "Deployed inventory & waste" is enabled |
+
+**Why this is safe for your Azure resources**
+
+- **Read-only, always.** No endpoint accepts a body that changes state. The Resource Graph `POST` is Azure's standard way to *run a read query* — it cannot write.
+- **No resource is touched.** It reads quota/usage counters, the SKU catalog, and zone metadata. It never reads resource *contents* or secrets, and never starts/stops/tags/deletes anything.
+- **Least privilege.** Works with **Reader**; hand it a Reader-scoped token and it is unable to modify anything by RBAC.
+- **Same data as the Portal.** These are the identical ARM endpoints the Azure Portal's Quota and Usage blades use.
+- **Gentle on ARM.** Calls are throttle-aware (adaptive concurrency backs off on HTTP 429), so large runs won't hammer the management plane.
+- **Scoped to your choices.** Nothing runs for providers you leave disabled; the two Resource Graph queries only fire on region auto-detect or when you opt into inventory.
+- **Worst case is harmless.** A call can be denied (403) or throttled (429) — there is no code path that can alter, create, or delete a resource.
+
+For a browser that makes **zero** calls, use the **Script generator + Import** tabs: you run the same read-only `az` commands yourself and import the resulting JSON.
+
 ## Security & privacy
+
 
 This tool is designed to keep your Azure credential safe:
 

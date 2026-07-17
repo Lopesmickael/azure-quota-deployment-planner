@@ -1,0 +1,13 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+
+# Local data — never commit real Azure output
+quota-report.json
+*.token
+token.txt
+
+# Node (only if tooling is added later)
+node_modules/

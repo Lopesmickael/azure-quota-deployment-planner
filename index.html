@@ -1230,13 +1230,6 @@ a { color: var(--ms-link); }
       <div class="empty" id="emptyRows" style="display:none">No rows match the current filters.</div>
     </div>
 
-    <!-- ODCR coverage -->
-    <div class="card" id="odcrPanel" style="display:none">
-      <div class="section-title"><svg class="ic"><use href="#ic-shield"/></svg> ODCR coverage <span class="sub" id="odcrSub"></span></div>
-      <p class="hint" style="margin:.2em 0 1em">On-Demand Capacity Reservations (<code>Microsoft.Compute/capacityReservationGroups</code>) reconciled against your running VM inventory. Shows how much of your footprint is <b>capacity-protected</b>, which <b>business-critical</b> families run <b>unprotected</b>, and any <b>idle reserved capacity</b> (paid-for but unused). Customer-scoped ARM data only.</p>
-      <div id="odcrBody"></div>
-    </div>
-
     <!-- Zone Mapping -->
     <div class="card" id="zonePanel" style="display:none">
       <div class="section-title"><svg class="ic"><use href="#ic-place"/></svg> Zone mapping <span class="sub" id="zoneSub"></span></div>
@@ -1329,9 +1322,6 @@ let plannerData = [];   // ALL VM sizes per sub|region for the Deployment planne
 let skuAll = {};        // "sub|family" -> { regions: { region: {deployable, zonesAvail:[]} } }  (all-region sweep, for alternatives)
 let skuSizeFamily = {}; // "Standard_D32ads_v5" -> "standardDADSv5Family"  (for inventory impact join)
 let subNames = {};      // subscriptionId -> friendly display name (resolved from ARM /subscriptions)
-let reservations = []; // On-Demand Capacity Reservations: [{sub,group,name,region,zones,size,family,capacity,used,state}]
-let odcrError = "";    // non-empty when the ODCR fetch was blocked/failed
-let odcrFetched = false;
 let confidence = [];   // per compute VM-family Deployment Confidence rows (0-100) derived from quota + skuInfo
 let zoneMaps = [];     // [{sub, subName, region, mappings:[{logicalZone, physicalZone}]}] — logical→physical AZ
 let zoneMapError = "";
@@ -1361,7 +1351,7 @@ let reconSort = { key:"cores", dir:-1 };   // sort state for the Deployed vs. qu
 /* ---- resume-on-token-expiry state ---- */
 let RUN = null;        // { descriptors:[...], doneIdx:Set, total, apiVer } — survives across attempts
 let authHalt = false;  // set true when a 401 is seen mid-run; stops firing new calls
-let sweeping = false;  // true while a live run + its post-step sweeps (SKU/inventory/ODCR) are in flight — gates Export
+let sweeping = false;  // true while a live run + its post-step sweeps (SKU/inventory) are in flight — gates Export
 
 const $ = (id) => document.getElementById(id);
 const icon = (id, cls="ic sm") => `<svg class="${cls}"><use href="#${id}"/></svg>`;
@@ -1948,7 +1938,6 @@ async function runLive(){
   // fresh run: reset data + build the resumable descriptor list
   rows = []; quotaRequests = []; failures = []; skuInfo = {}; skuList = []; skuAll = {}; skuSizeFamily = {}; subNames = {};
   _quotaGroupApplied = false;
-  reservations = []; odcrError = ""; odcrFetched = false;
   confidence = []; zoneMaps = []; zoneMapError = ""; zoneMapFetched = false;
   inventory = []; wasteSignals = { stoppedAllocatedVms:0, unattachedDisks:0, idlePublicIPs:0, stoppedCores:0 }; inventoryError = ""; inventoryFetched = false;
   isSample = false;
@@ -2406,53 +2395,6 @@ async function fetchSkusSweep(subs, token){
   }
 }
 
-/* Fetch On-Demand Capacity Reservations (ODCRs) for the given subscriptions.
-   Lists capacityReservationGroups at subscription scope, then each group's capacityReservations
-   (which carry the reserved SKU/size, quantity, zones and associated-VM count). Customer-scoped
-   ARM only — no internal/Kusto data. Non-fatal: on error the coverage section is simply hidden. */
-async function fetchReservations(subs, token){
-  odcrFetched = true; odcrError = "";
-  let anyErr = "";
-  for(const sub of subs){
-    const gurl = `https://management.azure.com/subscriptions/${sub}/providers/Microsoft.Compute/capacityReservationGroups?api-version=${ODCR_API}`;
-    let groups;
-    try{
-      const gr = await fetchAllPages(gurl, token);
-      if(!gr.ok){ anyErr = anyErr || gr.error || "capacityReservationGroups fetch failed"; continue; }
-      groups = gr.value || [];
-    }catch(e){ anyErr = anyErr || "Network/CORS block reaching ARM for ODCRs"; continue; }
-    for(const g of groups){
-      const gid = g.id || "";
-      const groupName = g.name || (gid.split("/").pop()) || "group";
-      const region = g.location || "";
-      const rurl = `https://management.azure.com${gid}/capacityReservations?api-version=${ODCR_API}`;
-      try{
-        const rr = await fetchAllPages(rurl, token);
-        if(!rr.ok){ anyErr = anyErr || rr.error; continue; }
-        (rr.value || []).forEach(cr => {
-          const p = cr.properties || {};
-          const sku = cr.sku || {};
-          const size = sku.name || "";
-          const capacity = Number(sku.capacity) || 0;
-          const assoc = Array.isArray(p.virtualMachinesAssociated) ? p.virtualMachinesAssociated.length : 0;
-          const util = p.utilizationInfo || {};
-          const usedCurrent = (util && typeof util.currentCapacity === "number") ? util.currentCapacity : assoc;
-          if(size && skuSizeFamily[size]) { /* family already known */ }
-          reservations.push({
-            sub, group: groupName, name: cr.name || "",
-            region: cr.location || region,
-            zones: (cr.zones || []).map(String),
-            size, family: skuSizeFamily[size] || sizeToFamily(size),
-            capacity, used: Math.max(assoc, usedCurrent||0),
-            state: p.provisioningState || ""
-          });
-        });
-      }catch(e){ anyErr = anyErr || "Network/CORS block reaching ARM for ODCRs"; }
-    }
-  }
-  if(!reservations.length && anyErr) odcrError = anyErr;
-}
-
 /* Best-effort VM size -> family fallback when the SKUs sweep hasn't mapped it.
    e.g. "Standard_D4s_v5" -> "standardDSv5Family", "Standard_NC24ads_A100_v4" -> "standardNCADSA100v4Family". */
 function sizeToFamily(size){
@@ -2462,69 +2404,6 @@ function sizeToFamily(size){
   if(!m) return "standard" + s.replace(/[^A-Za-z0-9]/g,"") + "Family";
   const series = m[1] || "", feats = (m[4]||"").toUpperCase(), accel = m[5] ? m[5].toUpperCase() : "", ver = m[6] || "";
   return "standard" + series.toUpperCase() + feats + (accel?accel:"") + (ver?("v"+ver):"") + "Family";
-}
-
-/* Join ODCRs against deployed inventory (running VMs) to produce a coverage analysis:
-   - reservation utilization (reserved vs used → idle/wasted capacity)
-   - footprint protection (deployed VMs covered vs uncovered per size×region)
-   - unprotected business-critical families (GPU/HPC/mainstream running with no reservation) */
-function computeOdcr(){
-  const resv = (reservations || []).map(r => {
-    const type = famType(r.family, /^standardN/i.test(r.family||"") ? 1 : 0);
-    const used = Math.min(r.used || 0, r.capacity || r.used || 0);
-    const idle = Math.max(0, (r.capacity||0) - used);
-    const util = (r.capacity>0) ? (used / r.capacity) : 0;
-    return Object.assign({}, r, { type, usedCapped: used, idle, util });
-  });
-  // deployed running VMs per sub|region|size
-  const depBySize = {};
-  (inventory || []).forEach(v => {
-    if(!invIsRunning(v.powerState)) return;
-    const key = `${v.sub||""}|${v.location}|${v.size}`;
-    depBySize[key] = (depBySize[key] || 0) + (Number(v.vms)||0);
-  });
-  // reserved & used per sub|region|size
-  const resBySize = {};
-  resv.forEach(r => {
-    const key = `${r.sub||""}|${r.region}|${r.size}`;
-    const m = resBySize[key] || (resBySize[key] = { reserved:0, used:0, family:r.family, type:r.type });
-    m.reserved += r.capacity||0; m.used += r.usedCapped||0;
-  });
-  // coverage rows: union of deployed and reserved size×region keys
-  const keys = {};
-  Object.keys(depBySize).forEach(k => keys[k]=1);
-  Object.keys(resBySize).forEach(k => keys[k]=1);
-  const gaps = [];
-  Object.keys(keys).forEach(k => {
-    const parts = k.split("|"); const sub=parts[0], region=parts[1], size=parts.slice(2).join("|");
-    const deployed = depBySize[k] || 0;
-    const rs = resBySize[k] || { reserved:0, used:0 };
-    const family = (rs.family) || skuSizeFamily[size] || sizeToFamily(size);
-    const type = famType(family, /^standardN/i.test(family||"") ? 1 : 0);
-    const covered = Math.min(deployed, rs.used || 0);
-    const uncovered = Math.max(0, deployed - covered);
-    const critical = (type === "gpu" || type === "hpc" || type === "mainstream");
-    gaps.push({ sub, region, size, family, type, deployed, reserved: rs.reserved||0, used: rs.used||0, covered, uncovered, critical });
-  });
-  gaps.sort((a,b) => {
-    if(b.uncovered !== a.uncovered) return b.uncovered - a.uncovered;
-    const ac = a.critical?1:0, bc = b.critical?1:0; if(ac!==bc) return bc-ac;
-    return b.deployed - a.deployed;
-  });
-  resv.sort((a,b) => (b.idle - a.idle) || (a.util - b.util) || (b.capacity - a.capacity));
-  // summary
-  let reservedCap=0, usedCap=0, protectedVMs=0, deployedVMs=0, unprotectedVMs=0, critUnprot=0;
-  resv.forEach(r => { reservedCap += r.capacity||0; usedCap += r.usedCapped||0; });
-  Object.keys(depBySize).forEach(k => deployedVMs += depBySize[k]);
-  gaps.forEach(gp => { protectedVMs += gp.covered; unprotectedVMs += gp.uncovered; if(gp.critical) critUnprot += gp.uncovered; });
-  const groups = {}; resv.forEach(r => groups[`${r.sub}|${r.group}`]=1);
-  const idleCap = Math.max(0, reservedCap - usedCap);
-  const util = reservedCap>0 ? usedCap/reservedCap : 0;
-  return { reservations: resv, gaps, summary: {
-    groups: Object.keys(groups).length, resvCount: resv.length,
-    reservedCap, usedCap, idleCap, util,
-    deployedVMs, protectedVMs, unprotectedVMs, criticalUnprotected: critUnprot
-  }};
 }
 
 /* Attach SKU deployability to matching VM-family usage rows (join by family == key). */
@@ -3556,15 +3435,6 @@ function sample(){
   ];
   inventoryFetched = true; inventoryError = "";
 
-  /* ODCR sample → one well-used reservation, one partly-idle reservation; GPU + westeurope left unprotected. */
-  reservations = [
-    // Covers 20 of the 30 D8s_v3 VMs (protected), fully used.
-    { sub:"", group:"crg-prod-eastus", name:"cr-d8sv3", region:"eastus", zones:["1"], size:"Standard_D8s_v3", family:"standardDSv3Family", capacity:20, used:20, state:"Succeeded" },
-    // Reserved 10 E16s_v5 but only 6 running → 4 idle (wasted spend).
-    { sub:"", group:"crg-prod-euw",    name:"cr-e16sv5", region:"westeurope", zones:["2"], size:"Standard_E16s_v5", family:"standardESv5Family", capacity:10, used:6, state:"Succeeded" }
-  ];
-  odcrFetched = true; odcrError = "";
-
   /* Zone-mapping sample → two subscriptions in eastus with MISALIGNED logical→physical zones,
      plus westeurope where both align. Demonstrates the cross-subscription co-location trap. */
   zoneMaps = [
@@ -3584,7 +3454,6 @@ function sample(){
   const SS = "sub-prod";
   rows.forEach(r => { if(!r.sub) r.sub = SS; });
   inventory.forEach(v => { if(!v.sub) v.sub = SS; });
-  reservations.forEach(v => { if(!v.sub) v.sub = SS; });
   quotaRequests.forEach(q => { if(!q.sub) q.sub = SS; });
   skuList.forEach(s => { if(!s.sub) s.sub = SS; });
   const remapEmptySub = obj => { const out = {}; Object.keys(obj).forEach(k => { out[k.replace(/^\|/, SS + "|")] = obj[k]; }); return out; };
@@ -3657,7 +3526,6 @@ function render(){
   plannerData = computePlannerSkus();
   drawPlanner();
   drawRequests();
-  drawOdcr();
   drawZoneMap();
   buildColsMenu();
   drawRows();
@@ -3670,7 +3538,7 @@ function render(){
 function applyPreviewConfig(){
   var PANEL_OF = {
     summary:"summary", risk:"riskPanel", restricted:"restrictPanel",
-    pending:"reqPanel", quota:"quotaPanel", odcr:"odcrPanel",
+    pending:"reqPanel", quota:"quotaPanel",
     zonemap:"zonePanel"
   };
   var cfg;
@@ -3687,114 +3555,6 @@ function applyPreviewConfig(){
       el.removeAttribute("data-cfg-off");  // enabled → leave each draw fn's own data-based visibility intact
     }
     results.appendChild(el);               // reorder to match config sequence
-  });
-}
-
-/* ---------- ODCR coverage (tool preview) ---------- */
-function odcrPct(n){ return (Math.round((n||0)*1000)/10) + "%"; }
-function drawOdcr(){
-  const panel = $("odcrPanel");
-  if(!panel) return;
-  panel.style.display = "none"; return;   // ODCR coverage / capacity-assurance section removed
-  const hasInv = inventory && inventory.length > 0;
-  const hasResv = reservations && reservations.length > 0;
-  // Show whenever we attempted an ODCR fetch (live/sample) or have any inventory/reservations.
-  // Only hide when there is nothing to say at all (e.g. imported quota-only JSON).
-  if(!odcrFetched && !hasInv && !hasResv){ panel.style.display = "none"; return; }
-  panel.style.display = "block";
-  const o = computeOdcr();
-  const s = o.summary;
-  if($("odcrSub")) $("odcrSub").textContent = hasResv
-    ? `\u2014 ${fmt(s.resvCount)} reservation(s) in ${fmt(s.groups)} group(s)`
-    : "\u2014 no reservations found";
-
-  if(!hasResv){
-    const vmLine = hasInv
-      ? `You have ${fmt(s.deployedVMs)} running VM(s) with <b>no capacity protection</b>.`
-      : `Deployed inventory is unavailable (it may be blocked by policy), so footprint-coverage can't be computed for this run.`;
-    $("odcrBody").innerHTML =
-      `<div class="odcr-empty">${icon("ic-shield","ic")}<b>No On-Demand Capacity Reservations found.</b><br/>`
-      + `${vmLine} For business-critical workloads (GPU/HPC/production), an ODCR guarantees capacity even when a region is constrained. `
-      + `<a href="https://learn.microsoft.com/en-us/azure/virtual-machines/capacity-reservation-overview" target="_blank" rel="noopener">Learn about Capacity Reservations</a>.</div>`;
-    return;
-  }
-
-  const covPct = s.deployedVMs > 0 ? (s.protectedVMs / s.deployedVMs) : 0;
-  const cards =
-    `<div class="restrict-summary">
-      <div class="rsum-card ${covPct>=0.8?'good':(covPct>=0.4?'warn':'crit')}"><div class="rsum-n">${odcrPct(covPct)}</div><div class="rsum-l">${icon("ic-shield","ic")} Footprint protected</div></div>
-      <div class="rsum-card ${s.util>=0.7?'good':'warn'}"><div class="rsum-n">${odcrPct(s.util)}</div><div class="rsum-l">${icon("ic-chart","ic")} Reservation utilisation</div></div>
-      <div class="rsum-card ${s.criticalUnprotected>0?'alert':''}"><div class="rsum-n">${fmt(s.criticalUnprotected)}</div><div class="rsum-l">${icon("ic-warning","ic")} Critical VMs unprotected</div></div>
-      <div class="rsum-card ${s.idleCap>0?'warn':''}"><div class="rsum-n">${fmt(s.idleCap)}</div><div class="rsum-l">${icon("ic-recycle","ic")} Idle reserved capacity</div></div>
-    </div>
-    <div class="cov-legend"><span><i class="used"></i> Used (protected)</span><span><i class="idle"></i> Idle reserved</span><span><i class="uncov"></i> Deployed, unprotected</span></div>`;
-
-  // Reservations table
-  const rrows = o.reservations.map(r => {
-    const tot = Math.max(r.capacity, r.usedCapped) || 1;
-    const usedW = Math.round((r.usedCapped/tot)*100), idleW = Math.round((r.idle/tot)*100);
-    return `<tr>
-      <td class="mono" title="${esc(r.sub||"")}">${esc(subLabel(r.sub))}</td>
-      <td class="mono">${esc(r.group)}</td>
-      <td><span class="region-tag">${esc(r.region)}</span></td>
-      <td class="rk" title="${esc(r.size)}">${esc(r.size)}</td>
-      <td class="mono">${r.zones.length?esc(r.zones.join(", ")):"\u2014"}</td>
-      <td class="num-cell">${fmt(r.capacity)}</td>
-      <td class="num-cell">${fmt(r.usedCapped)}</td>
-      <td style="min-width:130px"><div class="covbar"><i class="used" style="width:${usedW}%"></i><i class="idle" style="left:${usedW}%;width:${idleW}%"></i></div><span class="muted" style="font-size:11px">${odcrPct(r.util)} used${r.idle>0?` \u00b7 ${fmt(r.idle)} idle`:""}</span></td>
-    </tr>`;
-  }).join("");
-  const resvTable =
-    `<div class="odcr-h">${icon("ic-inventory","ic")} Reservations &amp; utilisation</div>
-    <div class="table-scroll" style="max-height:340px;overflow:auto">
-      <table><thead><tr>
-        <th>Subscription</th><th>Group</th><th>Region</th><th>Size</th><th>Zone(s)</th>
-        <th class="num-cell">Reserved</th><th class="num-cell">Used</th><th>Utilisation</th>
-      </tr></thead><tbody>${rrows}</tbody></table>
-    </div>`;
-
-  // Coverage gaps table (only rows with uncovered > 0, else a positive note)
-  const gapRows = o.gaps.filter(g => g.uncovered > 0);
-  let gapTable;
-  if(gapRows.length){
-    const gr = gapRows.slice(0, 200).map(g => {
-      const tot = Math.max(g.deployed, g.reserved) || 1;
-      const covW = Math.round((g.covered/tot)*100), unW = Math.round((g.uncovered/tot)*100);
-      const az = g.region;
-      const size = "Standard_" + String(g.size||"").replace(/^Standard_/i,"");
-      const cmd = `# Reserve capacity for the unprotected ${g.size} VMs in ${g.region}:\naz capacity reservation group create -n crg-${esc(g.size.replace(/[^A-Za-z0-9]/g,''))} -l ${g.region} -g <rg>\naz capacity reservation create -c crg-${esc(g.size.replace(/[^A-Za-z0-9]/g,''))} -n cr-${esc(g.size.replace(/[^A-Za-z0-9]/g,''))} -g <rg> --sku ${size} --capacity ${g.uncovered}`;
-      return `<tr>
-        <td class="mono" title="${esc(g.sub||"")}">${esc(subLabel(g.sub))}</td>
-        <td><span class="region-tag">${esc(g.region)}</span></td>
-        <td class="rk" title="${esc(g.size)}">${esc(g.size)}${g.critical?` <span class="sku-pill blocked">${icon("ic-warning","ic")} ${esc(g.type)}</span>`:""}</td>
-        <td class="num-cell">${fmt(g.deployed)}</td>
-        <td class="num-cell">${fmt(g.covered)}</td>
-        <td class="num-cell"><b>${fmt(g.uncovered)}</b></td>
-        <td style="min-width:130px"><div class="covbar"><i class="used" style="width:${covW}%"></i><i class="uncov" style="left:${covW}%;width:${unW}%"></i></div></td>
-        <td><button class="btn ghost sm copybtn" data-cmd="${esc(cmd)}" title="Copy az command to reserve capacity">${icon("ic-copy","ic")} Reserve</button></td>
-      </tr>`;
-    }).join("");
-    gapTable =
-      `<div class="odcr-h">${icon("ic-warning","ic")} Coverage gaps &mdash; running VMs with no reservation</div>
-      <div class="table-scroll" style="max-height:340px;overflow:auto">
-        <table><thead><tr>
-          <th>Subscription</th><th>Region</th><th>Size</th><th class="num-cell">Deployed</th><th class="num-cell">Covered</th>
-          <th class="num-cell">Uncovered</th><th>Coverage</th><th>Action</th>
-        </tr></thead><tbody>${gr}</tbody></table>
-      </div>`;
-  } else {
-    gapTable = `<div class="odcr-h">${icon("ic-check","ic")} Coverage gaps</div><div class="odcr-empty" style="border-style:solid">${icon("ic-done-all","ic")}All running VMs that map to a reservation size are fully covered. No unprotected footprint detected.</div>`;
-  }
-
-  $("odcrBody").innerHTML = cards + resvTable + gapTable;
-  // wire copy buttons
-  $("odcrBody").querySelectorAll(".copybtn").forEach(b => {
-    b.addEventListener("click", () => {
-      const cmd = b.getAttribute("data-cmd") || "";
-      if(navigator.clipboard) navigator.clipboard.writeText(cmd);
-      const old = b.innerHTML; b.innerHTML = icon("ic-check","ic") + " Copied";
-      setTimeout(() => { b.innerHTML = old; }, 1400);
-    });
   });
 }
 
@@ -4887,7 +4647,6 @@ async function buildReportHtml(){
   const kept = nonzeroOnly ? rows.filter(r => (Number(r.current) || 0) > 0) : rows.slice();
   const data = kept.sort((a,b) => b.pct - a.pct);
   const hidden = totalTracked - data.length;
-  const odcrData = computeOdcr();
   const zoneData = { maps: zoneMaps, consistency: computeZoneConsistency() };
   const plannerSkus = computePlannerSkus();
   // Over-provisioned quota (large limit, zero usage) is computed from the FULL rowset, not the
@@ -4900,7 +4659,7 @@ async function buildReportHtml(){
     plannerSkus,
     subNames,
     inventory: (inventoryError ? [] : inventory), wasteSignals, inventoryFetched: (inventoryFetched && !inventoryError),
-    odcr: odcrData, odcrFetched: odcrFetched, hasInventory: (!inventoryError && inventory.length > 0),
+    hasInventory: (!inventoryError && inventory.length > 0),
     zonemap: zoneData, overProvisioned: overProvisioned,
     deployedRegions: deployedRegionsList };
   const gz = await gzipBase64(JSON.stringify(payload));
@@ -4909,7 +4668,6 @@ async function buildReportHtml(){
   const hasInv = !inventoryError && inventoryFetched && (inventory.length > 0 || wasteSignals.stoppedAllocatedVms || wasteSignals.unattachedDisks || wasteSignals.idlePublicIPs);
   const hasDeployed = !inventoryError && inventory.length > 0;
   const hasRestrict = Array.isArray(plannerSkus) && plannerSkus.length > 0;
-  const hasOdcr = !!(odcrFetched || (odcrData && odcrData.reservations && odcrData.reservations.length) || (odcrData && odcrData.summary && odcrData.summary.deployedVMs > 0));
   const hasZonemap = Array.isArray(zoneMaps) && zoneMaps.length > 0;
 
   const css = `
@@ -5449,7 +5207,6 @@ async function buildReportHtml(){
     restricted: hasRestrict ? `<a href="#restricted">${navIcon("ic-block")}Deployment planner</a>` : "",
     pending:    hasReqs ? `<a href="#pending">${navIcon("ic-schedule")}Pending</a>` : "",
     quota:      `<a href="#quota">${navIcon("ic-table")}Quota</a>`,
-    odcr:       hasOdcr ? `<a href="#odcr">${navIcon("ic-shield")}ODCR</a>` : "",
     zonemap:    hasZonemap ? `<a href="#zonemap">${navIcon("ic-place")}Zones</a>` : ""
   };
 
@@ -5488,11 +5245,6 @@ async function buildReportHtml(){
     </div>
     <div id="quota-body"></div>
   </section>`;
-  const odcrSection = hasOdcr ? `
-  <section id="odcr">
-    <div class="shead"><div class="eyebrow">Capacity assurance</div><h2>${navIcon("ic-shield")}ODCR coverage</h2><div class="bar"></div><div class="note">On-Demand Capacity Reservations (<code>Microsoft.Compute/capacityReservationGroups</code>) reconciled against running VM inventory &mdash; how much of the footprint is capacity-protected, which business-critical families run unprotected, and any idle reserved capacity.</div></div>
-    <div id="odcr-body"></div>
-  </section>` : "";
   const confidenceSection = "";  // Deployment confidence removed per stakeholder feedback (risky heuristic).
   const zonemapSection = hasZonemap ? `
   <section id="zonemap">
@@ -5502,7 +5254,7 @@ async function buildReportHtml(){
 
   const secMap = {
     summary: summarySection, risk: riskSection,
-    restricted: restrictedSection, pending: pendingSection, quota: quotaSection, odcr: odcrSection,
+    restricted: restrictedSection, pending: pendingSection, quota: quotaSection,
     zonemap: zonemapSection
   };
 
@@ -6501,7 +6253,6 @@ function reportMain(){
     b.addEventListener("click",function(){window.scrollTo({top:0,behavior:"smooth"});});
   }
 
-  function odcrPct(n){ return (Math.round((n||0)*1000)/10) + "%"; }
 
   var zoneRegionSel=null;   // report zone map: mandatory single-region selection
   function buildZoneMap(Z){
@@ -6527,78 +6278,6 @@ function reportMain(){
     body.innerHTML=toolbar+table;
     var rsel=document.getElementById("zoneRegionSel");
     if(rsel)rsel.addEventListener("change",function(){zoneRegionSel=rsel.value;buildZoneMap(Z);});
-  }
-
-  function buildOdcr(O, meta){
-    var body=document.getElementById("odcr-body"); if(!body||!O)return;
-    var s=O.summary||{}, resv=O.reservations||[], gaps=O.gaps||[];
-    meta=meta||{};
-    if(!resv.length){
-      var vmLine = meta.hasInventory
-        ? ('You have '+fmt(s.deployedVMs||0)+' running VM(s) with <b>no capacity protection</b>.')
-        : 'Deployed inventory is unavailable (it may be blocked by policy), so footprint-coverage could not be computed for this run.';
-      body.innerHTML='<div class="odcr-empty">'+icon("ic-shield",28)+'<b>No On-Demand Capacity Reservations found.</b><br/>'
-        +vmLine+' For business-critical workloads (GPU/HPC/production), an ODCR guarantees capacity even when a region is constrained. '
-        +'<a class="vmp-link" href="https://learn.microsoft.com/en-us/azure/virtual-machines/capacity-reservation-overview" target="_blank" rel="noopener">'+icon("ic-info",12)+' Learn about Capacity Reservations</a></div>';
-      return;
-    }
-    var covPct=(s.deployedVMs>0)?(s.protectedVMs/s.deployedVMs):0;
-    var cards='<div class="odcr-cards">'
-      +'<div class="ocard '+(covPct>=0.8?'good':(covPct>=0.4?'warn':'crit'))+'"><div class="on">'+odcrPct(covPct)+'</div><div class="ol">'+icon("ic-shield",14)+' Footprint protected</div></div>'
-      +'<div class="ocard '+(s.util>=0.7?'good':'warn')+'"><div class="on">'+odcrPct(s.util||0)+'</div><div class="ol">'+icon("ic-chart",14)+' Reservation utilisation</div></div>'
-      +'<div class="ocard '+((s.criticalUnprotected||0)>0?'alert':'')+'"><div class="on">'+fmt(s.criticalUnprotected||0)+'</div><div class="ol">'+icon("ic-warning",14)+' Critical VMs unprotected</div></div>'
-      +'<div class="ocard '+((s.idleCap||0)>0?'warn':'')+'"><div class="on">'+fmt(s.idleCap||0)+'</div><div class="ol">'+icon("ic-recycle",14)+' Idle reserved capacity</div></div>'
-      +'</div>'
-      +'<div class="cov-legend"><span><i class="used"></i> Used (protected)</span><span><i class="idle"></i> Idle reserved</span><span><i class="uncov"></i> Deployed, unprotected</span></div>';
-
-    var rrows=resv.map(function(r){
-      var tot=Math.max(r.capacity,r.usedCapped)||1;
-      var usedW=Math.round((r.usedCapped/tot)*100), idleW=Math.round((r.idle/tot)*100);
-      return '<tr><td class="mono" title="'+esc(r.sub||"")+'">'+esc(subLabel(r.sub))+'</td><td class="mono">'+esc(r.group)+'</td><td>'+regCell(r.region)+'</td>'
-        +'<td class="rk" title="'+esc(r.size)+'">'+esc(r.size)+'</td>'
-        +'<td class="mono">'+(r.zones&&r.zones.length?esc(r.zones.join(", ")):"\u2014")+'</td>'
-        +'<td class="num">'+fmt(r.capacity)+'</td><td class="num">'+fmt(r.usedCapped)+'</td>'
-        +'<td style="min-width:150px"><div class="covbar"><i class="used" style="width:'+usedW+'%"></i><i class="idle" style="left:'+usedW+'%;width:'+idleW+'%"></i></div>'
-        +'<span class="muted" style="font-size:11px">'+odcrPct(r.util)+' used'+(r.idle>0?(" \u00b7 "+fmt(r.idle)+" idle"):"")+'</span></td></tr>';
-    }).join("");
-    var resvTable='<div class="odcr-h">'+icon("ic-inventory",16)+' Reservations &amp; utilisation</div>'
-      +'<div class="tblwrap"><div class="tscroll" style="max-height:340px"><table class="dt"><thead><tr>'
-      +'<th>Subscription</th><th>Group</th><th>Region</th><th>Size</th><th>Zone(s)</th><th class="num">Reserved</th><th class="num">Used</th><th>Utilisation</th>'
-      +'</tr></thead><tbody>'+rrows+'</tbody></table></div></div>';
-
-    var gapRows=gaps.filter(function(g){return g.uncovered>0;});
-    var gapTable;
-    if(gapRows.length){
-      var gr=gapRows.slice(0,200).map(function(g){
-        var tot=Math.max(g.deployed,g.reserved)||1;
-        var covW=Math.round((g.covered/tot)*100), unW=Math.round((g.uncovered/tot)*100);
-        var size="Standard_"+String(g.size||"").replace(/^Standard_/i,"");
-        var safe=esc(String(g.size||"").replace(/[^A-Za-z0-9]/g,''));
-        var cmd="# Reserve capacity for the unprotected "+g.size+" VMs in "+g.region+":\\naz capacity reservation group create -n crg-"+safe+" -l "+g.region+" -g <rg>\\naz capacity reservation create -c crg-"+safe+" -n cr-"+safe+" -g <rg> --sku "+size+" --capacity "+g.uncovered;
-        return '<tr><td class="mono" title="'+esc(g.sub||"")+'">'+esc(subLabel(g.sub))+'</td><td>'+regCell(g.region)+'</td>'
-          +'<td class="rk" title="'+esc(g.size)+'">'+esc(g.size)+(g.critical?(' <span class="skub zone" style="margin-left:6px">'+icon("ic-warning",11)+' '+esc(g.type)+'</span>'):"")+'</td>'
-          +'<td class="num">'+fmt(g.deployed)+'</td><td class="num">'+fmt(g.covered)+'</td><td class="num"><b>'+fmt(g.uncovered)+'</b></td>'
-          +'<td style="min-width:150px"><div class="covbar"><i class="used" style="width:'+covW+'%"></i><i class="uncov" style="left:'+covW+'%;width:'+unW+'%"></i></div></td>'
-          +'<td><button class="obtn ocopy" data-cmd="'+esc(cmd)+'">'+icon("ic-copy",13)+' Reserve</button></td></tr>';
-      }).join("");
-      gapTable='<div class="odcr-h">'+icon("ic-warning",16)+' Coverage gaps &mdash; running VMs with no reservation</div>'
-        +'<div class="tblwrap"><div class="tscroll" style="max-height:340px"><table class="dt"><thead><tr>'
-        +'<th>Subscription</th><th>Region</th><th>Size</th><th class="num">Deployed</th><th class="num">Covered</th><th class="num">Uncovered</th><th>Coverage</th><th>Action</th>'
-        +'</tr></thead><tbody>'+gr+'</tbody></table></div></div>';
-    } else {
-      gapTable='<div class="odcr-h">'+icon("ic-check",16)+' Coverage gaps</div><div class="odcr-empty ok">'+icon("ic-done-all",28)+'All running VMs that map to a reservation size are fully covered. No unprotected footprint detected.</div>';
-    }
-
-    body.innerHTML=cards+resvTable+gapTable;
-    body.querySelectorAll(".ocopy").forEach(function(b){
-      b.addEventListener("click",function(){
-        var cmd=(b.getAttribute("data-cmd")||"").replace(/\\n/g,"\n");
-        if(navigator.clipboard)navigator.clipboard.writeText(cmd);
-        var old=b.innerHTML; b.innerHTML=icon("ic-check",13)+" Copied";
-        setTimeout(function(){b.innerHTML=old;},1400);
-      });
-    });
-    if(typeof setupVmTooltip==="function"&&setupVmTooltip.mark)setupVmTooltip.mark();
   }
 
   function render(payload){
@@ -6640,8 +6319,6 @@ function reportMain(){
     if(PLAN.length&&document.getElementById("restricted-body"))buildPlanner(PLAN,payload.deployedRegions||[]);
     if(REQS.length&&document.getElementById("pending-body"))buildPending(REQS);
     if(document.getElementById("quota-body"))buildQuota(DATA,MULTI);
-    var ODCR=payload.odcr||null;
-    if(ODCR&&document.getElementById("odcr-body"))buildOdcr(ODCR, { hasInventory: !!payload.hasInventory, odcrFetched: !!payload.odcrFetched });
     var ZONE=payload.zonemap||null;
     if(ZONE&&document.getElementById("zonemap-body"))buildZoneMap(ZONE);
     setupNav();

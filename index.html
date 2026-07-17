@@ -2006,14 +2006,8 @@ async function runLive(){
     showMsg($("liveMsg"), "Select at least one resource provider.", "err", "ic-error");
   }
 
-  // ODCR coverage — always attempt on a clean live completion, independent of the inventory toggle,
-  // so the section appears for every live report. Cheap: one list call per subscription (+ per group).
-  if(!authHalt && (RUN === null || noEndpoints) && provs.length && !odcrFetched){
-    setProgress("run", "Checking On-Demand Capacity Reservations (ODCR coverage)\u2026");
-    await fetchReservations(subs, token);
-    setProgress("", "");
-    render();
-  }
+  // ODCR coverage section was removed from this build — skip the capacityReservationGroups
+  // fetch entirely so no On-Demand Capacity Reservation API calls are made.
 
   // Zone mapping — logical→physical AZ per subscription (one /locations call per sub). Cheap, Reader-only.
   if(!authHalt && (RUN === null || noEndpoints) && provs.length && !zoneMapFetched){
@@ -2163,16 +2157,7 @@ async function resumeRun(){
       render();
     }
   }
-  // ODCR coverage — always attempt after a clean resume, independent of the inventory toggle.
-  if(RUN === null && !authHalt && !odcrFetched){
-    const subsO = parseSubIds($("subId").value);
-    if(subsO.length){
-      setProgress("run", "Checking On-Demand Capacity Reservations (ODCR coverage)\u2026");
-      await fetchReservations(subsO, token);
-      setProgress("", "");
-      render();
-    }
-  }
+  // ODCR coverage section was removed from this build — skip the capacityReservationGroups fetch on resume.
   // Zone mapping after a clean resume.
   if(RUN === null && !authHalt && !zoneMapFetched){
     const subsZ = parseSubIds($("subId").value);

@@ -12,6 +12,7 @@ Everything runs in your browser. No backend, no data leaves your machine, and th
 - **At-risk view** — surfaces quotas approaching their limit so you can request increases before deployments fail.
 - **Pending quota-increase requests** — see in-flight `Microsoft.Quota/quotaRequests` at a glance.
 - **Deployment planner** — pick one subscription and any region to browse **every VM size** offered there (available *and* restricted), one row per SKU with vCPUs, memory, availability-zone coverage, family quota headroom, and a deployable/blocked status. Filter by vCPUs/memory to find a working alternative when a size is restricted.
+- **Isolated platform-service report** — a separate live-only tab for App Service Plans, Azure SQL / Managed Instance, PostgreSQL Flexible Server, Storage, and Automation Accounts. It has independent inputs, results, and CSV/HTML exports, so it does not modify the existing quota report.
 - **Zone mapping** — Azure assigns logical zones (1/2/3) independently per subscription; this shows each subscription's logical→physical zone mapping.
 - **Adaptive throttling** — Live fetch auto-tunes concurrency: each HTTP 429 halves the request rate and ramps back up as ARM recovers, so large subscription lists still finish.
 - **Offline path** — can't use Live fetch (e.g., CORS)? Generate an `az` collector script, run it in Cloud Shell, and import the resulting `quota-report.json`. No token ever touches the browser.
@@ -29,13 +30,24 @@ Everything runs in your browser. No backend, no data leaves your machine, and th
 
 The token is used only from your browser to call `management.azure.com` directly and is valid for ~60–75 minutes.
 
+### Platform services
+
+Use the **Platform services** tab when you only need quota/current-limit counters for App Service, Azure SQL, PostgreSQL Flexible Server, Storage, or Automation Accounts. Enter its subscription IDs, ARM token, and regions, select the services, then click **Generate service report**.
+
+This workflow is intentionally independent from **Live fetch**:
+
+- It maintains separate inputs, state, failures, results, and CSV/HTML exports.
+- It is live-only in this version; the Script generator and Import tabs continue to serve the original report.
+- Automation Accounts are discovered per subscription and then queried individually for account-scoped usage counters.
+- The values are quota counters, not Azure Monitor operational metrics. CPU percentage, database storage consumed, transactions, IOPS, bandwidth, and job health are out of scope.
+
 ### Offline / CORS-blocked
 
 Use the **Script generator** tab to produce an `az` collector, run it in Azure Cloud Shell, then bring the combined `quota-report.json` back via the **Import** tab. Fully offline — no token in the browser.
 
 ## Data sources
 
-`Microsoft.Compute` / `Microsoft.Network` usages, `Microsoft.Quota` (quotas, usages, quotaRequests), `Microsoft.Compute/skus` for VM availability & restrictions, and `Microsoft.ResourceGraph` for region detection — all on `management.azure.com`.
+`Microsoft.Compute` / `Microsoft.Network` usages, `Microsoft.Quota` (quotas, usages, quotaRequests), `Microsoft.Compute/skus` for VM availability & restrictions, `Microsoft.ResourceGraph` for region detection, and service-specific usage APIs for `Microsoft.Web`, `Microsoft.Sql`, `Microsoft.DBforPostgreSQL`, `Microsoft.Storage`, and `Microsoft.Automation` — all on `management.azure.com`.
 
 ## API calls & permissions (read-only)
 
@@ -54,6 +66,12 @@ Every call this tool makes is **read-only** — it never creates, modifies, or d
 | 9 | GET | `…/Microsoft.Compute/skus` | VM sizes across all regions | If "SKU availability" is enabled |
 | 10 | GET | `/subscriptions/{sub}/locations` | Logical→physical availability-zone mapping | Always (once per sub) |
 | 11 | POST | `…/Microsoft.ResourceGraph/resources` | KQL query listing deployed VMs / disks / public IPs | Only if "Deployed inventory & waste" is enabled |
+| 12 | GET | `…/Microsoft.Web/locations/{region}/usages` | Regional App Service core usage and limit | Platform services tab; if App Service is selected |
+| 13 | GET | `…/Microsoft.Sql/locations/{region}/usages` | Regional Azure SQL / Managed Instance quotas and usage | Platform services tab; if Azure SQL is selected |
+| 14 | GET | `…/Microsoft.DBforPostgreSQL/locations/{region}/resourceType/flexibleServers/usages` | PostgreSQL Flexible Server family quota and usage | Platform services tab; if PostgreSQL is selected |
+| 15 | GET | `…/Microsoft.Storage/locations/{region}/usages` | Regional Storage resource-count quotas and usage | Platform services tab; if Storage is selected |
+| 16 | GET | `…/Microsoft.Automation/automationAccounts` | Automation Accounts in the subscription | Platform services tab; once per selected subscription |
+| 17 | GET | `…/Microsoft.Automation/automationAccounts/{account}/usages` | Per-account and subscription Automation usage counters | Platform services tab; for accounts in selected regions |
 
 **Why this is safe for your Azure resources**
 

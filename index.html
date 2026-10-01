@@ -137,8 +137,8 @@ header.app-head { display: flex; align-items: center; justify-content: space-bet
 /* Fields */
 label.fld { display: block; margin-bottom: 15px; }
 .fld { margin-bottom: 15px; }
-#liveMode .region-head { margin-top: 4px; }
-#liveMode > .fld + .fld { margin-top: 22px; }
+#liveMode .region-head, #platformMode .region-head { margin-top: 4px; }
+#liveMode > .fld + .fld, #platformMode > .fld + .fld { margin-top: 22px; }
 label.fld > span.lab, .fld > span.lab, .region-head > span.lab { display: block; font-size: 12.5px; font-weight: 700; margin-bottom: 5px; color: var(--ms-text); }
 label.fld > span.lab .sub, .fld > span.lab .sub, .lab .sub { font-weight: 400; color: var(--ms-text-muted); }
 input[type=text], input[type=password], textarea, select {
@@ -197,6 +197,28 @@ textarea.mono { font-family: Consolas, "Courier New", Courier, monospace; font-s
 .subopts { margin: 8px 0 0 4px; padding: 10px 12px; border-left: 2px solid var(--ms-border); display: none; }
 .subopts.show { display: block; }
 .subopts .provgrid { margin-top: 0; }
+
+/* isolated platform-service report */
+.platform-intro { margin: 0 0 16px; color: var(--ms-text-muted); font-size: 12.5px; line-height: 1.5; }
+.platform-results { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--ms-border); }
+.platform-results[hidden] { display: none; }
+.platform-summary { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 10px; margin: 0 0 14px; }
+.platform-stat { border: 1px solid var(--ms-border); border-radius: var(--radius-ctl); padding: 11px 13px; background: var(--ms-surface-soft); }
+.platform-stat b { display: block; font-size: 20px; line-height: 1.15; color: var(--ms-text); }
+.platform-stat span { font-size: 11.5px; color: var(--ms-text-muted); }
+.platform-filters { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 10px; margin-bottom: 12px; }
+.platform-filters label { font-size: 11.5px; font-weight: 700; color: var(--ms-text-muted); }
+.platform-filters select, .platform-filters input { margin-top: 4px; }
+.platform-table th[data-platform-sort] { cursor: pointer; user-select: none; }
+.platform-table th[data-platform-sort]:hover { color: var(--ms-primary); }
+.platform-table .scope-cell { max-width: 230px; overflow-wrap: anywhere; }
+.platform-table .unlimited { color: var(--ms-success); font-weight: 600; }
+.platform-failures { margin-top: 16px; }
+.platform-failures summary { cursor: pointer; color: var(--ms-danger); font-weight: 600; }
+@media (max-width: 800px){
+  .platform-summary { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+  .platform-filters { grid-template-columns: 1fr; }
+}
 
 /* actions/buttons */
 .actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
@@ -961,6 +983,7 @@ a { color: var(--ms-link); }
   <div class="card">
     <div class="pivot" id="modeTabs">
       <button class="tab active" data-mode="live"><svg class="ic sm"><use href="#ic-cloud-dl"/></svg> Live fetch</button>
+      <button class="tab" data-mode="platform"><svg class="ic sm"><use href="#ic-storage"/></svg> Platform services</button>
       <button class="tab" data-mode="script"><svg class="ic sm"><use href="#ic-terminal"/></svg> Script generator</button>
       <button class="tab" data-mode="import"><svg class="ic sm"><use href="#ic-upload"/></svg> Import CLI / JSON</button>
       <button class="btn ghost sm" id="demoBtn" title="Preview the report layout with realistic sample data — no token or fetch needed"><svg class="ic"><use href="#ic-download"/></svg> Load sample data</button>
@@ -1054,6 +1077,95 @@ a { color: var(--ms-link); }
         <span id="resumeMsg" style="flex:1"></span>
         <button class="btn sm" id="resumeBtn"><svg class="ic"><use href="#ic-play"/></svg> Resume</button>
         <button class="btn ghost sm" id="resumeCancelBtn"><svg class="ic"><use href="#ic-clear"/></svg> Discard</button>
+      </div>
+    </div>
+
+    <!-- ================= PLATFORM SERVICES MODE ================= -->
+    <div id="platformMode" class="mode-hide">
+      <p class="platform-intro">Independent live quota report for App Service, Azure SQL / Managed Instance, PostgreSQL Flexible Server, Storage, and Automation Accounts. This workflow has separate inputs, state, results, and exports; it does not change the existing quota report. Values are quota counters, not Azure Monitor performance metrics.</p>
+      <div class="token-bar">
+        <span class="token-step">Step 1 &middot; get a token</span>
+        <code>az account get-access-token --resource https://management.azure.com --query accessToken -o tsv</code>
+        <button type="button" class="btn ghost sm" id="platformCopyAzCmd" title="Copy command" aria-label="Copy command"><svg class="ic"><use href="#ic-copy"/></svg> Copy</button>
+      </div>
+      <div class="cors-note"><svg class="ic sm"><use href="#ic-info"/></svg><span>Live ARM calls only. You need <b>Reader</b> on each subscription. The token and results stay in this page and are not added to the existing report.</span></div>
+      <div class="grid3">
+        <div class="fld">
+          <span class="lab">Subscription ID(s) <span class="sub">&mdash; comma / space / newline separated</span></span>
+          <textarea id="platformSubIds" class="mono field-tall" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" spellcheck="false"></textarea>
+          <span class="sub-count" id="platformSubCount"></span>
+        </div>
+        <div class="fld">
+          <span class="lab">****** token <span class="sub">&mdash; used only by this tab</span></span>
+          <textarea id="platformToken" class="mono field-tall" placeholder="******;(valid ~60&ndash;75 min)"></textarea>
+          <div class="token-chip" id="platformTokenChip"></div>
+        </div>
+        <div class="fld">
+          <span class="lab">Parallel requests</span>
+          <input type="number" id="platformParallel" min="1" max="32" value="8" />
+        </div>
+      </div>
+
+      <div class="fld">
+        <span class="lab">Regions <span class="sub">&mdash; Azure region names separated by comma, space, or newline</span></span>
+        <textarea id="platformRegions" class="mono" style="min-height:72px" placeholder="eastus&#10;westus2&#10;westeurope" autocomplete="off" spellcheck="false"></textarea>
+      </div>
+
+      <div class="fld">
+        <span class="lab" style="font-weight:700;color:var(--ms-text)">Services</span>
+        <div class="provgrid">
+          <label class="provtile"><input type="checkbox" class="platformProvChk" value="web" checked /><svg class="ic"><use href="#ic-cloud"/></svg> App Service Plans</label>
+          <label class="provtile"><input type="checkbox" class="platformProvChk" value="sql" checked /><svg class="ic"><use href="#ic-storage"/></svg> Azure SQL / Managed Instance</label>
+          <label class="provtile"><input type="checkbox" class="platformProvChk" value="postgres" checked /><svg class="ic"><use href="#ic-inventory"/></svg> PostgreSQL Flexible Server</label>
+          <label class="provtile"><input type="checkbox" class="platformProvChk" value="storage" checked /><svg class="ic"><use href="#ic-storage"/></svg> Storage</label>
+          <label class="provtile"><input type="checkbox" class="platformProvChk" value="automation" checked /><svg class="ic"><use href="#ic-refresh"/></svg> Automation Accounts</label>
+        </div>
+      </div>
+
+      <div class="action-bar">
+        <div class="action-left">
+          <button class="btn" id="platformRunBtn"><svg class="ic"><use href="#ic-play"/></svg> Generate service report</button>
+          <button class="btn ghost sm" id="platformClearBtn" disabled><svg class="ic"><use href="#ic-clear"/></svg> Clear results</button>
+        </div>
+        <div class="action-right">
+          <button class="btn ghost sm" id="platformHtmlBtn" disabled><svg class="ic"><use href="#ic-download"/></svg> Export HTML</button>
+          <button class="btn ghost sm" id="platformCsvBtn" disabled><svg class="ic"><use href="#ic-download"/></svg> Export CSV</button>
+        </div>
+      </div>
+      <div class="actions actionbar" style="margin-top:10px">
+        <span id="platformProgress" class="progress"></span>
+      </div>
+      <div class="msg" id="platformMsg"></div>
+
+      <div class="platform-results" id="platformResults" hidden>
+        <div class="section-title"><svg class="ic"><use href="#ic-table"/></svg> Platform-service quota &amp; usage</div>
+        <div class="platform-summary" id="platformSummary"></div>
+        <div class="platform-filters">
+          <label>Provider<select id="platformProviderFilter"><option value="">All providers</option></select></label>
+          <label>Region<select id="platformRegionFilter"><option value="">All regions</option></select></label>
+          <label>Search<input type="text" id="platformSearch" placeholder="Quota, account, subscription..." /></label>
+        </div>
+        <div class="table-scroll">
+          <table class="platform-table">
+            <thead><tr>
+              <th data-platform-sort="sub">Subscription</th>
+              <th data-platform-sort="provider">Provider</th>
+              <th data-platform-sort="region">Region</th>
+              <th data-platform-sort="scope">Resource / account</th>
+              <th data-platform-sort="label">Quota</th>
+              <th class="num-cell" data-platform-sort="current">Used</th>
+              <th class="num-cell" data-platform-sort="limit">Limit</th>
+              <th class="num-cell" data-platform-sort="remaining">Remaining</th>
+              <th class="pct-cell" data-platform-sort="pct">% Used</th>
+              <th data-platform-sort="unit">Unit</th>
+            </tr></thead>
+            <tbody id="platformBody"></tbody>
+          </table>
+        </div>
+        <details class="platform-failures" id="platformFailurePanel" hidden>
+          <summary id="platformFailureTitle">Failures</summary>
+          <div class="table-scroll"><table><thead><tr><th>Provider</th><th>Region</th><th>Subscription</th><th>Scope</th><th>Status</th><th>Reason</th></tr></thead><tbody id="platformFailureBody"></tbody></table></div>
+        </details>
       </div>
     </div>
 
@@ -1334,6 +1446,19 @@ let _quotaGroupApplied = false;   // default the quota table to Subscription→R
 let sortKey = "pct", sortDir = -1;
 const selectedRegions = new Set();
 
+/* ---- isolated platform-service quota report ---- */
+const PLATFORM_APIS = {
+  web: { label:"App Service", path:"Microsoft.Web", version:"2024-11-01" },
+  sql: { label:"Azure SQL", path:"Microsoft.Sql", version:"2023-08-01" },
+  postgres: { label:"PostgreSQL Flexible Server", path:"Microsoft.DBforPostgreSQL", version:"2025-08-01" },
+  storage: { label:"Storage", path:"Microsoft.Storage", version:"2023-05-01" },
+  automation: { label:"Automation", path:"Microsoft.Automation", version:"2024-10-23" }
+};
+let platformRows = [];
+let platformFailures = [];
+let platformSort = { key:"pct", dir:-1 };
+let platformRunActive = false;
+
 /* Friendly subscription name (falls back to the ID when the name isn't resolved).
    Customers relate to the name rather than the GUID, so all reports prefer this. */
 function subLabel(id){
@@ -1543,6 +1668,13 @@ $("themeToggle").addEventListener("click", () => {
 $("copyAzCmd").addEventListener("click", async () => {
   const b = $("copyAzCmd");
   try { await navigator.clipboard.writeText($("azTokenCmd").textContent.trim());
+    const o = b.innerHTML; b.innerHTML = icon("ic-check", "ic"); setTimeout(() => b.innerHTML = o, 1500);
+  } catch(_){ b.title = "Copy failed"; }
+});
+$("platformCopyAzCmd").addEventListener("click", async () => {
+  const b = $("platformCopyAzCmd");
+  const command = "az account get-access-token --resource https://management.azure.com --query accessToken -o tsv";
+  try { await navigator.clipboard.writeText(command);
     const o = b.innerHTML; b.innerHTML = icon("ic-check", "ic"); setTimeout(() => b.innerHTML = o, 1500);
   } catch(_){ b.title = "Copy failed"; }
 });
@@ -1765,8 +1897,11 @@ document.querySelectorAll("#modeTabs .tab").forEach(t => {
     t.classList.add("active");
     const m = t.dataset.mode;
     $("liveMode").classList.toggle("mode-hide", m !== "live");
+    $("platformMode").classList.toggle("mode-hide", m !== "platform");
     $("importMode").classList.toggle("mode-hide", m !== "import");
     $("scriptMode").classList.toggle("mode-hide", m !== "script");
+    $("results").classList.toggle("mode-hide", m === "platform");
+    $("demoBtn").classList.toggle("mode-hide", m === "platform");
     if(m === "script") updateScripts();
   });
 });
@@ -1775,6 +1910,28 @@ document.querySelectorAll("#modeTabs .tab").forEach(t => {
 $("runBtn").addEventListener("click", runLive);
 $("resumeBtn").addEventListener("click", resumeRun);
 $("resumeCancelBtn").addEventListener("click", cancelResume);
+
+/* ===================== PLATFORM-SERVICE FETCH ===================== */
+$("platformRunBtn").addEventListener("click", runPlatformServices);
+$("platformClearBtn").addEventListener("click", clearPlatformResults);
+$("platformCsvBtn").addEventListener("click", exportPlatformCsv);
+$("platformHtmlBtn").addEventListener("click", exportPlatformHtml);
+$("platformSubIds").addEventListener("input", () => {
+  const count = parseSubIds($("platformSubIds").value).length;
+  $("platformSubCount").textContent = count ? `${count} subscription${count===1?"":"s"}` : "";
+});
+$("platformToken").addEventListener("input", platformUpdateTokenChip);
+["platformProviderFilter","platformRegionFilter"].forEach(id => $(id).addEventListener("change", renderPlatformTable));
+$("platformSearch").addEventListener("input", renderPlatformTable);
+document.querySelectorAll("[data-platform-sort]").forEach(th => th.addEventListener("click", () => {
+  const key = th.dataset.platformSort;
+  if(platformSort.key === key) platformSort.dir *= -1;
+  else {
+    platformSort.key = key;
+    platformSort.dir = ["current","limit","remaining","pct"].includes(key) ? -1 : 1;
+  }
+  renderPlatformTable();
+}));
 $("subId").addEventListener("input", () => { updateScripts(); updateSubCount(); });
 
 /* Import subscription IDs from CSV / Excel / text file */
@@ -2224,6 +2381,426 @@ async function fetchQuotaRequests(sub, rp, region, token){
     });
     return { type:"requests", requests: reqs };
   }catch(e){ return { type:"requests", requests: [] }; }
+}
+
+/* ===================== ISOLATED PLATFORM-SERVICE QUOTAS ===================== */
+function platformSetProgress(text, kind="run"){
+  const el = $("platformProgress");
+  if(!el) return;
+  if(!text){ el.className = "progress"; el.innerHTML = ""; return; }
+  const ic = kind === "warn" ? "ic-warning" : kind === "done" ? "ic-check" : "ic-refresh";
+  el.className = "progress " + kind;
+  el.innerHTML = `${icon(ic, "prog-ic")}<span class="prog-txt">${esc(text)}</span>`;
+}
+
+function platformUpdateTokenChip(){
+  const el = $("platformTokenChip");
+  if(!el) return;
+  const ti = tokenInfo($("platformToken").value);
+  if(ti.state === "empty"){ el.className = "token-chip"; el.textContent = ""; return; }
+  if(ti.state === "opaque"){ el.className = "token-chip neutral"; el.textContent = "Token pasted"; return; }
+  if(ti.state === "expired"){ el.className = "token-chip bad"; el.textContent = "Expired"; return; }
+  el.className = "token-chip " + (ti.minsLeft <= 5 ? "warnc" : "good");
+  el.textContent = `${ti.minsLeft} min remaining`;
+}
+
+function platformRegions(){
+  const seen = new Set();
+  return String($("platformRegions").value || "").split(/[\s,;]+/).map(v => v.trim().toLowerCase().replace(/[^a-z0-9]/g, "")).filter(v => {
+    if(!v || seen.has(v)) return false;
+    seen.add(v); return true;
+  });
+}
+
+function platformLocation(value){
+  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function platformNumber(value, fallback=0){
+  if(value && typeof value === "object" && "value" in value) value = value.value;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function normalizePlatformUsages(items, meta){
+  return (Array.isArray(items) ? items : []).map(item => {
+    const p = item && item.properties && typeof item.properties === "object" ? item.properties : item || {};
+    const name = p.name ?? item?.name;
+    const label = p.displayName || (name && typeof name === "object" ? (name.localizedValue || name.value) : name) || "Unknown quota";
+    const key = (name && typeof name === "object" ? name.value : name) || item?.id || label;
+    const current = platformNumber(p.currentValue ?? p.usage ?? p.usages, 0);
+    const rawLimit = p.limit;
+    const hasLimit = rawLimit != null && Number.isFinite(Number(rawLimit && typeof rawLimit === "object" && "value" in rawLimit ? rawLimit.value : rawLimit));
+    const limit = hasLimit ? platformNumber(rawLimit) : null;
+    const unlimited = limit === -1;
+    const remaining = limit != null && limit >= 0 ? limit - current : null;
+    const usedPct = limit > 0 ? (current / limit) * 100 : (limit === 0 && current > 0 ? 100 : null);
+    return {
+      sub: meta.sub,
+      provider: meta.provider,
+      providerLabel: PLATFORM_APIS[meta.provider]?.label || meta.provider,
+      region: platformLocation(item?.location || meta.region),
+      scope: meta.scope || "Subscription",
+      label: String(label),
+      key: String(key),
+      current,
+      limit,
+      remaining,
+      pct: usedPct,
+      unlimited,
+      unit: p.unit || item?.unit || "Count"
+    };
+  });
+}
+
+function makePlatformRun(parallel){
+  const run = { pauseUntil:0, throttles:0, lastThrottleAt:0, maxConc:parallel, sem:makeSemaphore(parallel) };
+  return run;
+}
+
+async function platformArmFetch(run, url, token, tries=6){
+  const wait = run.pauseUntil - Date.now();
+  if(wait > 0) await sleep(wait + Math.floor(Math.random()*100));
+  let res;
+  await run.sem.acquire();
+  try { res = await fetch(url, H(token)); }
+  catch(e){ throw e; }
+  finally { run.sem.release(); }
+  if((res.status === 429 || res.status === 503) && tries > 0){
+    const retryAfter = Number(res.headers.get("Retry-After")) || 2;
+    const waitMs = Math.min(retryAfter, 30) * 1000 + Math.floor(Math.random()*300);
+    run.throttles++;
+    run.lastThrottleAt = Date.now();
+    run.pauseUntil = Math.max(run.pauseUntil, Date.now() + waitMs);
+    run.sem.setCapacity(Math.max(1, Math.floor(run.sem.capacity() / 2)));
+    await sleep(waitMs);
+    return platformArmFetch(run, url, token, tries - 1);
+  }
+  if(res.ok && run.sem.capacity() < run.maxConc && Date.now() - run.lastThrottleAt > THROTTLE_RECOVER_MS){
+    run.sem.setCapacity(run.sem.capacity() + 1);
+  }
+  return res;
+}
+
+async function platformFetchAllPages(run, url, token){
+  const values = [];
+  let next = url, pages = 0;
+  while(next && pages < 50){
+    let res;
+    try { res = await platformArmFetch(run, next, token); }
+    catch(e){ const n = networkErrorInfo(e); return { ok:false, value:values, error:n.message, status:n.status }; }
+    if(!res.ok){
+      const err = await classifyError(res);
+      return { ok:false, value:values, error:err.message, status:err.status };
+    }
+    const data = await res.json();
+    values.push(...(Array.isArray(data.value) ? data.value : []));
+    next = data.nextLink || null;
+    pages++;
+  }
+  return { ok:true, value:values };
+}
+
+function platformRegionalUrl(provider, sub, region){
+  const root = `https://management.azure.com/subscriptions/${sub}/providers`;
+  if(provider === "postgres"){
+    return `${root}/Microsoft.DBforPostgreSQL/locations/${region}/resourceType/flexibleServers/usages?api-version=${PLATFORM_APIS.postgres.version}`;
+  }
+  const cfg = PLATFORM_APIS[provider];
+  return `${root}/${cfg.path}/locations/${region}/usages?api-version=${cfg.version}`;
+}
+
+async function platformRegionalTask(run, task, token){
+  const url = platformRegionalUrl(task.provider, task.sub, task.region);
+  const r = await platformFetchAllPages(run, url, token);
+  if(!r.ok) return { ok:false, task, error:r.error, status:r.status };
+  return { ok:true, task, rows:normalizePlatformUsages(r.value, { sub:task.sub, provider:task.provider, region:task.region, scope:"Subscription" }) };
+}
+
+async function platformListAutomation(run, sub, token){
+  const url = `https://management.azure.com/subscriptions/${sub}/providers/Microsoft.Automation/automationAccounts?api-version=${PLATFORM_APIS.automation.version}`;
+  const r = await platformFetchAllPages(run, url, token);
+  if(!r.ok) return { ok:false, sub, error:r.error, status:r.status };
+  return { ok:true, sub, accounts:r.value };
+}
+
+function automationScope(account){
+  const match = String(account.id || "").match(/\/resourceGroups\/([^/]+)/i);
+  const rg = match ? match[1] : "";
+  return rg ? `${rg} / ${account.name || "Automation account"}` : (account.name || "Automation account");
+}
+
+async function platformAutomationTask(run, task, token){
+  const resourceId = String(task.account.id || "");
+  const url = `https://management.azure.com${resourceId}/usages?api-version=${PLATFORM_APIS.automation.version}`;
+  const r = await platformFetchAllPages(run, url, token);
+  if(!r.ok) return { ok:false, task, error:r.error, status:r.status };
+  const accountScope = automationScope(task.account);
+  const rows = normalizePlatformUsages(r.value, {
+    sub:task.sub,
+    provider:"automation",
+    region:task.region,
+    scope:accountScope
+  }).map(row => {
+    const subscriptionKeys = new Set(["subscriptionusage", "dscsubscriptionusage"]);
+    if(subscriptionKeys.has(row.key.toLowerCase())){
+      row.scope = "Subscription";
+      row.region = "all";
+    }
+    return row;
+  });
+  return {
+    ok:true,
+    task,
+    rows
+  };
+}
+
+function dedupePlatformRows(rows){
+  const seen = new Set();
+  return rows.filter(row => {
+    if(row.provider !== "automation" || row.scope !== "Subscription") return true;
+    const key = `${row.sub}|${row.key}`;
+    if(seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function platformFailure(result, fallbackProvider){
+  const t = result.task || {};
+  return {
+    provider: t.provider || fallbackProvider || "automation",
+    region: t.region || platformLocation(t.account?.location) || "\u2014",
+    sub: t.sub || result.sub || "",
+    scope: t.account ? automationScope(t.account) : "Subscription",
+    status: result.status ?? "",
+    error: result.error || "Request failed"
+  };
+}
+
+async function platformRunTasks(run, tasks, token, worker, phase, completedStart, total){
+  let completed = completedStart;
+  const concurrency = run.maxConc;
+  const results = await runPool(tasks, async task => {
+    try { return await worker(run, task, token); }
+    finally {
+      completed++;
+      const throttle = run.throttles ? `; ${run.throttles} throttle retry${run.throttles===1?"":"s"}` : "";
+      platformSetProgress(`${phase}: ${completed}/${total} calls complete${throttle}`, run.throttles ? "warn" : "run");
+    }
+  }, concurrency);
+  return { results, completed };
+}
+
+async function runPlatformServices(){
+  if(platformRunActive) return;
+  clearMsg($("platformMsg"));
+  const subs = parseSubIds($("platformSubIds").value);
+  const token = $("platformToken").value.trim();
+  const regions = platformRegions();
+  const providers = [...document.querySelectorAll(".platformProvChk:checked")].map(c => c.value);
+  if(!subs.length){ showMsg($("platformMsg"), "Enter at least one valid subscription GUID.", "err", "ic-error"); return; }
+  if(token.length < 20){ showMsg($("platformMsg"), "Paste an ARM bearer token.", "err", "ic-error"); return; }
+  if(!regions.length){ showMsg($("platformMsg"), "Enter at least one Azure region.", "err", "ic-error"); return; }
+  if(!providers.length){ showMsg($("platformMsg"), "Select at least one service.", "err", "ic-error"); return; }
+  const ti = tokenInfo(token);
+  if(ti.state === "expired"){ showMsg($("platformMsg"), "Your token is expired. Get a fresh token and try again.", "err", "ic-error"); return; }
+  if(ti.state === "valid" && ti.aud && !ti.audOk){
+    showMsg($("platformMsg"), "This token is not for management.azure.com. Run the token command shown above.", "err", "ic-error");
+    return;
+  }
+
+  const parallelEl = $("platformParallel");
+  let parallel = parseInt(parallelEl.value, 10);
+  if(!Number.isFinite(parallel)) parallel = 8;
+  parallel = Math.max(1, Math.min(32, parallel));
+  parallelEl.value = parallel;
+
+  platformRunActive = true;
+  platformRows = [];
+  platformFailures = [];
+  $("platformRunBtn").disabled = true;
+  $("platformClearBtn").disabled = true;
+  $("platformHtmlBtn").disabled = true;
+  $("platformCsvBtn").disabled = true;
+  $("platformResults").hidden = true;
+  const run = makePlatformRun(parallel);
+
+  const regionalProviders = providers.filter(p => p !== "automation");
+  const regionalTasks = [];
+  subs.forEach(sub => regions.forEach(region => regionalProviders.forEach(provider => regionalTasks.push({ provider, sub, region }))));
+  const automationSelected = providers.includes("automation");
+  let completed = 0;
+  let estimatedTotal = regionalTasks.length + (automationSelected ? subs.length : 0);
+
+  try{
+    if(regionalTasks.length){
+      platformSetProgress(`Querying ${regionalTasks.length} regional endpoint(s)...`);
+      const phase = await platformRunTasks(run, regionalTasks, token, platformRegionalTask, "Regional quotas", completed, estimatedTotal);
+      completed = phase.completed;
+      phase.results.forEach(r => {
+        if(r.status !== "fulfilled"){ platformFailures.push({ provider:"unknown", region:"\u2014", sub:"", scope:"Subscription", status:"", error:r.reason?.message || "Request failed" }); return; }
+        if(r.value.ok) platformRows.push(...r.value.rows);
+        else platformFailures.push(platformFailure(r.value));
+      });
+    }
+
+    if(automationSelected){
+      platformSetProgress(`Discovering Automation Accounts in ${subs.length} subscription(s)...`);
+      const discoveries = await platformRunTasks(
+        run,
+        subs.map(sub => ({ sub })),
+        token,
+        (ctx, task, tok) => platformListAutomation(ctx, task.sub, tok),
+        "Automation discovery",
+        completed,
+        estimatedTotal
+      );
+      completed = discoveries.completed;
+      const accountTasks = [];
+      const regionSet = new Set(regions);
+      discoveries.results.forEach(r => {
+        if(r.status !== "fulfilled"){
+          platformFailures.push({ provider:"automation", region:"\u2014", sub:"", scope:"Account discovery", status:"", error:r.reason?.message || "Request failed" });
+          return;
+        }
+        const value = r.value;
+        if(!value.ok){ platformFailures.push(platformFailure(value, "automation")); return; }
+        value.accounts.forEach(account => {
+          const region = platformLocation(account.location);
+          if(regionSet.has(region) && account.id) accountTasks.push({ provider:"automation", sub:value.sub, region, account });
+        });
+      });
+      estimatedTotal += accountTasks.length;
+      if(accountTasks.length){
+        platformSetProgress(`Querying ${accountTasks.length} Automation Account(s)...`);
+        const usages = await platformRunTasks(run, accountTasks, token, platformAutomationTask, "Automation quotas", completed, estimatedTotal);
+        completed = usages.completed;
+        usages.results.forEach(r => {
+          if(r.status !== "fulfilled"){
+            platformFailures.push({ provider:"automation", region:"\u2014", sub:"", scope:"Automation account", status:"", error:r.reason?.message || "Request failed" });
+            return;
+          }
+          if(r.value.ok) platformRows.push(...r.value.rows);
+          else platformFailures.push(platformFailure(r.value, "automation"));
+        });
+      }
+    }
+
+    platformRows = dedupePlatformRows(platformRows);
+    renderPlatformResults();
+    if(platformRows.length){
+      const suffix = platformFailures.length ? `; ${platformFailures.length} endpoint(s) failed and are listed below` : "";
+      showMsg($("platformMsg"), `Service report ready with ${platformRows.length} quota row(s)${suffix}.`, platformFailures.length ? "warn" : "info", platformFailures.length ? "ic-warning" : "ic-check");
+      platformSetProgress("Collection complete", "done");
+    } else {
+      showMsg($("platformMsg"), platformFailures.length ? "No quota rows were returned. Review the endpoint failures below." : "No quota counters were returned for the selected services and regions.", "warn", "ic-warning");
+      platformSetProgress("", "");
+    }
+  } finally {
+    platformRunActive = false;
+    $("platformRunBtn").disabled = false;
+    $("platformClearBtn").disabled = !(platformRows.length || platformFailures.length);
+    $("platformHtmlBtn").disabled = !platformRows.length;
+    $("platformCsvBtn").disabled = !platformRows.length;
+  }
+}
+
+function platformCurrentView(){
+  const provider = $("platformProviderFilter").value;
+  const region = $("platformRegionFilter").value;
+  const search = $("platformSearch").value.trim().toLowerCase();
+  const valueFor = (row, key) => {
+    if(key === "remaining") return row.remaining == null ? -Infinity : row.remaining;
+    if(key === "pct") return row.pct == null ? -Infinity : row.pct;
+    if(key === "provider") return row.providerLabel;
+    return row[key] ?? "";
+  };
+  return platformRows.filter(row => {
+    if(provider && row.provider !== provider) return false;
+    if(region && row.region !== region && !(row.provider === "automation" && row.scope === "Subscription")) return false;
+    if(search && !`${row.sub} ${row.providerLabel} ${row.region} ${row.scope} ${row.label} ${row.key}`.toLowerCase().includes(search)) return false;
+    return true;
+  }).sort((a,b) => {
+    const av = valueFor(a, platformSort.key), bv = valueFor(b, platformSort.key);
+    if(typeof av === "number" && typeof bv === "number") return (av - bv) * platformSort.dir;
+    return String(av).localeCompare(String(bv), undefined, { numeric:true, sensitivity:"base" }) * platformSort.dir;
+  });
+}
+
+function platformLimitText(row){
+  if(row.unlimited) return '<span class="unlimited">Unlimited</span>';
+  return row.limit != null ? fmt(row.limit) : "\u2014";
+}
+
+function renderPlatformTable(){
+  const view = platformCurrentView();
+  $("platformBody").innerHTML = view.length ? view.map(row => `<tr>
+    <td class="mono">${esc(row.sub)}</td>
+    <td>${esc(row.providerLabel)}</td>
+    <td><span class="region-tag">${esc(row.region)}</span></td>
+    <td class="scope-cell">${esc(row.scope)}</td>
+    <td><span class="rk">${esc(row.label)}</span><div class="muted" style="font-size:11px">${esc(row.key)}</div></td>
+    <td class="num-cell">${fmt(row.current)}</td>
+    <td class="num-cell">${platformLimitText(row)}</td>
+    <td class="num-cell">${row.remaining == null ? "\u2014" : fmt(row.remaining)}</td>
+    <td class="pct-cell">${row.pct == null ? "\u2014" : `${row.pct.toFixed(1)}%`}</td>
+    <td>${esc(row.unit)}</td>
+  </tr>`).join("") : '<tr><td colspan="10" class="muted" style="text-align:center;padding:22px">No quota rows match the current filters.</td></tr>';
+}
+
+function renderPlatformResults(){
+  const hasAnything = platformRows.length || platformFailures.length;
+  $("platformResults").hidden = !hasAnything;
+  if(!hasAnything) return;
+  const providerCount = new Set(platformRows.map(r => r.provider)).size;
+  const regions = new Set(platformRows.map(r => r.region)).size;
+  const atRisk = platformRows.filter(r => r.pct != null && r.pct >= 80).length;
+  $("platformSummary").innerHTML = [
+    [platformRows.length, "Quota counters"],
+    [providerCount, "Services returned"],
+    [regions, "Regions returned"],
+    [atRisk, "At or above 80%"]
+  ].map(x => `<div class="platform-stat"><b>${fmt(x[0])}</b><span>${x[1]}</span></div>`).join("");
+
+  const providerSelect = $("platformProviderFilter");
+  const oldProvider = providerSelect.value;
+  const providers = [...new Set(platformRows.map(r => r.provider))].sort();
+  providerSelect.innerHTML = '<option value="">All providers</option>' + providers.map(p => `<option value="${esc(p)}">${esc(PLATFORM_APIS[p]?.label || p)}</option>`).join("");
+  if(providers.includes(oldProvider)) providerSelect.value = oldProvider;
+
+  const regionSelect = $("platformRegionFilter");
+  const oldRegion = regionSelect.value;
+  const regionValues = [...new Set(platformRows.map(r => r.region).filter(r => r !== "all"))].sort();
+  regionSelect.innerHTML = '<option value="">All regions</option>' + regionValues.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+  if(regionValues.includes(oldRegion)) regionSelect.value = oldRegion;
+
+  const failurePanel = $("platformFailurePanel");
+  failurePanel.hidden = !platformFailures.length;
+  $("platformFailureTitle").textContent = `${platformFailures.length} endpoint failure${platformFailures.length===1?"":"s"}`;
+  $("platformFailureBody").innerHTML = platformFailures.map(f => `<tr>
+    <td>${esc(PLATFORM_APIS[f.provider]?.label || f.provider)}</td><td>${esc(f.region)}</td><td class="mono">${esc(f.sub)}</td>
+    <td>${esc(f.scope)}</td><td>${esc(f.status)}</td><td>${esc(f.error)}</td>
+  </tr>`).join("");
+  renderPlatformTable();
+}
+
+function clearPlatformResults(){
+  platformRows = [];
+  platformFailures = [];
+  $("platformResults").hidden = true;
+  $("platformBody").innerHTML = "";
+  $("platformFailureBody").innerHTML = "";
+  $("platformFailurePanel").hidden = true;
+  $("platformSearch").value = "";
+  $("platformProviderFilter").value = "";
+  $("platformRegionFilter").value = "";
+  $("platformClearBtn").disabled = true;
+  $("platformHtmlBtn").disabled = true;
+  $("platformCsvBtn").disabled = true;
+  clearMsg($("platformMsg"));
+  platformSetProgress("", "");
 }
 
 async function errText(res){
@@ -4611,6 +5188,66 @@ $("csvBtn").addEventListener("click", () => {
   URL.revokeObjectURL(a.href);
 });
 
+function csvCell(value){
+  const s = String(value ?? "");
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadBlob(content, type, filename){
+  const blob = new Blob([content], { type });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 0);
+}
+
+function exportPlatformCsv(){
+  const view = platformCurrentView();
+  if(!view.length) return;
+  const columns = ["Subscription","Provider","Region","ResourceOrAccount","Quota","Key","Used","Limit","Remaining","PercentUsed","Unit"];
+  const lines = [columns.map(csvCell).join(",")];
+  view.forEach(row => lines.push([
+    row.sub,
+    row.providerLabel,
+    row.region,
+    row.scope,
+    row.label,
+    row.key,
+    row.current,
+    row.unlimited ? "Unlimited" : (row.limit != null ? row.limit : ""),
+    row.remaining == null ? "" : row.remaining,
+    row.pct == null ? "" : row.pct.toFixed(1),
+    row.unit
+  ].map(csvCell).join(",")));
+  downloadBlob(lines.join("\n"), "text/csv;charset=utf-8", `Azure-Platform-Service-Quotas_${stamp()}.csv`);
+}
+
+function buildPlatformReportHtml(){
+  const view = platformCurrentView();
+  const when = new Date().toLocaleString();
+  const rowsHtml = view.map(row => `<tr>
+    <td>${esc(row.sub)}</td><td>${esc(row.providerLabel)}</td><td>${esc(row.region)}</td><td>${esc(row.scope)}</td>
+    <td><b>${esc(row.label)}</b><small>${esc(row.key)}</small></td><td class="n">${fmt(row.current)}</td>
+    <td class="n">${row.unlimited ? "Unlimited" : (row.limit != null ? fmt(row.limit) : "\u2014")}</td>
+    <td class="n">${row.remaining == null ? "\u2014" : fmt(row.remaining)}</td>
+    <td class="n">${row.pct == null ? "\u2014" : `${row.pct.toFixed(1)}%`}</td><td>${esc(row.unit)}</td>
+  </tr>`).join("");
+  const failuresHtml = platformFailures.length ? `<section><h2>Endpoint failures</h2><table><thead><tr><th>Provider</th><th>Region</th><th>Subscription</th><th>Scope</th><th>Status</th><th>Reason</th></tr></thead><tbody>${platformFailures.map(f => `<tr><td>${esc(PLATFORM_APIS[f.provider]?.label || f.provider)}</td><td>${esc(f.region)}</td><td>${esc(f.sub)}</td><td>${esc(f.scope)}</td><td>${esc(f.status)}</td><td>${esc(f.error)}</td></tr>`).join("")}</tbody></table></section>` : "";
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Azure Platform-Service Quotas</title><style>
+  :root{font-family:"Segoe UI",Arial,sans-serif;color:#242424;background:#f5f5f5}body{margin:0;padding:28px}main{max-width:1500px;margin:auto;background:#fff;border:1px solid #ddd;border-radius:8px;padding:24px}h1{font-size:24px;margin:0 0 6px}h2{font-size:17px;margin:26px 0 8px}.meta{color:#616161;margin-bottom:18px}.note{padding:10px 12px;background:#f3f2f1;border-left:3px solid #0078d4;margin-bottom:18px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:7px 8px;border-bottom:1px solid #e1dfdd;text-align:left;vertical-align:top}th{background:#f3f2f1;white-space:nowrap}.n{text-align:right;font-variant-numeric:tabular-nums}small{display:block;color:#777;margin-top:2px}section{overflow-x:auto}@media print{body{padding:0;background:#fff}main{border:0}}</style></head><body><main>
+  <h1>Azure Platform-Service Quota &amp; Usage</h1><div class="meta">Generated ${esc(when)} &middot; ${fmt(view.length)} displayed quota counter(s)</div>
+  <div class="note">Quota/current-limit counters from Azure Resource Manager. These are not Azure Monitor performance or consumption metrics.</div>
+  <section><table><thead><tr><th>Subscription</th><th>Provider</th><th>Region</th><th>Resource / account</th><th>Quota</th><th>Used</th><th>Limit</th><th>Remaining</th><th>% Used</th><th>Unit</th></tr></thead><tbody>${rowsHtml}</tbody></table></section>
+  ${failuresHtml}</main></body></html>`;
+}
+
+function exportPlatformHtml(){
+  const view = platformCurrentView();
+  if(!view.length) return;
+  downloadBlob(buildPlatformReportHtml(), "text/html;charset=utf-8", `Azure-Platform-Service-Quotas_${stamp()}.html`);
+}
+
 /* ===================== EXPORT STANDALONE HTML REPORT ===================== */
 function stamp(){
   const d = new Date();
@@ -6577,11 +7214,14 @@ document.addEventListener("keydown", e => {
   if((e.ctrlKey||e.metaKey) && e.key==="Enter"){
     const liveVisible = !$("liveMode").classList.contains("mode-hide");
     if(liveVisible && !$("runBtn").disabled){ e.preventDefault(); runLive(); }
+    const platformVisible = !$("platformMode").classList.contains("mode-hide");
+    if(platformVisible && !$("platformRunBtn").disabled){ e.preventDefault(); runPlatformServices(); }
   }
 });
 
 restorePrefs();
 updateTokenChip();
+platformUpdateTokenChip();
 updateScripts();
 </script>
 </body>

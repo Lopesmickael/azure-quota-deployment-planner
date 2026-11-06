@@ -8,7 +8,7 @@ Everything runs in your browser. No backend, no data leaves your machine, and th
 
 ## Features
 
-- **Live fetch** from ARM using a bearer token you generate yourself (`Microsoft.Compute`, `Microsoft.Network`, and the unified `Microsoft.Quota` multi-RP provider).
+- **Live fetch** from ARM using a bearer token you generate yourself (`Microsoft.Compute`, `Microsoft.Network`, the unified `Microsoft.Quota` multi-RP provider, and App Service regional quotas via `Microsoft.Web` in Preview).
 - **At-risk view** — surfaces quotas approaching their limit so you can request increases before deployments fail.
 - **Pending quota-increase requests** — see in-flight `Microsoft.Quota/quotaRequests` at a glance.
 - **Deployment planner** — pick one subscription and any region to browse **every VM size** offered there (available *and* restricted), one row per SKU with vCPUs, memory, availability-zone coverage, family quota headroom, and a deployable/blocked status. Filter by vCPUs/memory to find a working alternative when a size is restricted.
@@ -29,6 +29,14 @@ Everything runs in your browser. No backend, no data leaves your machine, and th
 4. Export the report as HTML or CSV to share.
 
 The token is used only from your browser to call `management.azure.com` directly and is valid for ~60–75 minutes.
+
+### App Service Quota (Preview)
+
+In **Live fetch → Resource providers**, enable **Microsoft.Quota**, then select **Microsoft.Web — App Service (Preview)** under **Quota scopes to query**. Use the existing subscription, token, and region inputs and select **Generate report**. App Service counters appear alongside the other providers in the existing report, filters, risk view, and HTML/CSV exports.
+
+The correct Azure namespace is **Microsoft.Web**, not `Microsoft.AppServices`. Although selected in the scope picker, App Service uses its documented regional `Microsoft.Web/locations/{region}/usages` endpoint, not the unified `Microsoft.Quota` endpoints. No App Service quota-request API calls or VM deployment analysis are performed. Quota headroom does not guarantee App Service deployment/scaling capacity.
+
+For offline collection, select **App Service Quota (Microsoft.Web)** in **Script generator**, then import the combined JSON as usual. The generated Bash/PowerShell collectors preserve the App Service provider identity. Scope selections are saved with the existing preferences; tokens are never saved. The separate **Platform services** workflow remains unchanged.
 
 ### Platform services
 
@@ -66,7 +74,7 @@ Every call this tool makes is **read-only** — it never creates, modifies, or d
 | 9 | GET | `…/Microsoft.Compute/skus` | VM sizes across all regions | If "SKU availability" is enabled |
 | 10 | GET | `/subscriptions/{sub}/locations` | Logical→physical availability-zone mapping | Always (once per sub) |
 | 11 | POST | `…/Microsoft.ResourceGraph/resources` | KQL query listing deployed VMs / disks / public IPs | Only if "Deployed inventory & waste" is enabled |
-| 12 | GET | `…/Microsoft.Web/locations/{region}/usages` | Regional App Service core usage and limit | Platform services tab; if App Service is selected |
+| 12 | GET | `…/Microsoft.Web/locations/{region}/usages` | Regional App Service core usage and limit | Live fetch App Service Preview scope; also Platform services if App Service is selected |
 | 13 | GET | `…/Microsoft.Sql/locations/{region}/usages` | Regional Azure SQL / Managed Instance quotas and usage | Platform services tab; if Azure SQL is selected |
 | 14 | GET | `…/Microsoft.DBforPostgreSQL/locations/{region}/resourceType/flexibleServers/usages` | PostgreSQL Flexible Server family quota and usage | Platform services tab; if PostgreSQL is selected |
 | 15 | GET | `…/Microsoft.Storage/locations/{region}/usages` | Regional Storage resource-count quotas and usage | Platform services tab; if Storage is selected |
@@ -97,6 +105,12 @@ This tool is designed to keep your Azure credential safe:
 - **Use a least-privilege token.** The tool only needs **Reader**. Prefer a Reader-scoped identity, and treat the token like a password — it is a live Azure credential valid for ~60–75 minutes.
 
 The exported report is a standalone HTML file containing only quota/usage data you chose to include — never the token.
+
+## Versioning
+
+The app footer and both downloaded HTML report types display the tool version. `APP_VERSION` in [index.html](index.html) is the single source of truth; downloaded reports retain the version that generated them.
+
+Update this value manually when a set of merged changes is ready for release, not on every branch merge. Verify the app and both HTML exports show the new version, then commit and push the release changes. No automatic version bumps or changelog are required.
 
 ## License
 

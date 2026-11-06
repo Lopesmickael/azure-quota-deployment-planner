@@ -454,6 +454,8 @@ tbody tr:last-child td { border-bottom: none; }
 .pill.p-network { background: var(--ms-success-soft); color: var(--ms-success); }
 .pill.p-storage { background: var(--ms-warning-soft); color: var(--ms-warning); }
 .pill.p-quota { background: var(--ms-purple-soft); color: var(--ms-purple); }
+.pill.p-appservice { background: var(--ms-primary-soft); color: var(--ms-primary); }
+.preview-badge { border: 1px solid var(--ms-warning); border-radius: var(--radius-ctl); padding: 1px 5px; background: var(--ms-warning-soft); color: var(--ms-text); font-size: 11px; }
 .region-tag { font-family: Consolas, monospace; font-size: 11.5px; color: var(--ms-text-muted); }
 /* SKU availability pills + derived insights */
 .sku-pill { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 700; vertical-align: middle; margin-left: 6px; white-space: nowrap; }
@@ -1047,6 +1049,7 @@ a { color: var(--ms-link); }
             <label class="provtile"><input type="checkbox" class="quotaRpChk" value="Microsoft.Compute" checked /> Microsoft.Compute</label>
             <label class="provtile"><input type="checkbox" class="quotaRpChk" value="Microsoft.Network" checked /> Microsoft.Network</label>
             <label class="provtile"><input type="checkbox" class="quotaRpChk" value="Microsoft.MachineLearningServices" /> Microsoft.MachineLearningServices</label>
+            <label class="provtile"><input type="checkbox" class="quotaRpChk" value="Microsoft.Web" /> Microsoft.Web &mdash; App Service <span class="preview-badge">Preview</span></label>
           </div>
         </div>
       </div>
@@ -1199,6 +1202,7 @@ a { color: var(--ms-link); }
         <label class="provtile"><input type="checkbox" class="scriptProv" value="network" checked /><svg class="ic"><use href="#ic-cloud"/></svg> az network list-usages</label>
         <label class="provtile"><input type="checkbox" class="scriptProv" value="storage" /><svg class="ic"><use href="#ic-storage"/></svg> az storage account show-usage</label>
         <label class="provtile"><input type="checkbox" class="scriptProv" value="quota" /><svg class="ic"><use href="#ic-tune"/></svg> az quota list (Microsoft.Quota)</label>
+        <label class="provtile"><input type="checkbox" class="scriptProv" value="appservice" /><svg class="ic"><use href="#ic-cloud"/></svg> App Service Quota (Microsoft.Web) <span class="preview-badge">Preview</span></label>
       </div>
       <label class="inline" style="display:flex;gap:6px;align-items:center;margin-bottom:8px;padding-left:13px;font-size:12.5px;color:var(--ms-text-muted)">
         <input type="checkbox" id="scriptSave" checked /> Write the combined result to <b>quota-report.json</b> (uncheck to print JSON to screen instead)
@@ -1351,7 +1355,8 @@ a { color: var(--ms-link); }
   </div>
 
   <footer>
-    Sources: <code>Microsoft.Compute</code> / <code>Microsoft.Network</code> usages &amp; <code>Microsoft.Quota</code> (quotas, usages, quotaRequests); region detection via <code>Microsoft.ResourceGraph</code> &mdash; all on <code>management.azure.com</code>.
+    <div id="appVersion"></div>
+    Sources: <code>Microsoft.Compute</code> / <code>Microsoft.Network</code> / <code>Microsoft.Web</code> usages &amp; <code>Microsoft.Quota</code> (quotas, usages, quotaRequests); region detection via <code>Microsoft.ResourceGraph</code> &mdash; all on <code>management.azure.com</code>.
   </footer>
 </div>
 
@@ -1394,6 +1399,9 @@ a { color: var(--ms-link); }
 
 <script>
 "use strict";
+
+const APP_VERSION = "2.3";
+document.getElementById("appVersion").textContent = `Version ${APP_VERSION}`;
 
 // Azure public-cloud regions — aligned to Microsoft's official regions-list (verified 2026-07-02)
 const ALL_REGIONS = [
@@ -1606,20 +1614,41 @@ async function armFetch(url, token, tries){
   }
   return res;
 }
-async function fetchAllPages(url, token){
+async function fetchAllPages(url, token, strict=false){
   // returns { ok, value:[...], error?, status? } following nextLink
   let out = [], next = url, pages = 0;
+  const visited = new Set();
   while(next && pages < 50){
+    if(strict){
+      let target;
+      try { target = new URL(next, url); }
+      catch(_){ return { ok:false, value:out, error:"Invalid App Service pagination URL; collection is incomplete.", status:200 }; }
+      const source = new URL(url);
+      if(target.origin !== source.origin || target.pathname !== source.pathname || target.username || target.password || visited.has(target.href)){
+        return { ok:false, value:out, error:"Unexpected or repeated App Service pagination URL; collection is incomplete.", status:200 };
+      }
+      visited.add(target.href);
+      next = target.href;
+    }
     const res = await armFetch(next, token);
     if(!res.ok){
-      if(out.length) break; // partial pages already collected — keep them
+      if(out.length && !strict) break; // partial pages already collected — keep them
       const err = await classifyError(res);
       return { ok:false, value:[], error: err.message, status: err.status };
     }
-    const data = await res.json();
+    let data;
+    try { data = await res.json(); }
+    catch(e){
+      if(!strict) throw e;
+      return { ok:false, value:out, error:"Invalid JSON in App Service usage response; collection is incomplete.", status:res.status };
+    }
+    if(strict && (!data || !Array.isArray(data.value) || (data.nextLink != null && typeof data.nextLink !== "string"))){
+      return { ok:false, value:out, error:"Invalid App Service usage response; collection is incomplete.", status:res.status };
+    }
     out = out.concat(data.value || []);
     next = data.nextLink || null; pages++;
   }
+  if(strict && next) return { ok:false, value:out, error:"App Service pagination exceeded 50 pages; collection is incomplete.", status:200 };
   return { ok:true, value: out };
 }
 
@@ -2108,6 +2137,10 @@ async function runLive(){
       if(provs.includes("skus")) descriptors.push({ kind:"skus", sub, region });
       if(doQuota){
         for(const rp of quotaRps){
+          if(rp === "Microsoft.Web"){
+            descriptors.push({ kind:"usage", sub, region, provider:"appservice" });
+            continue;
+          }
           descriptors.push({ kind:"quota", sub, region, rp });
           descriptors.push({ kind:"requests", sub, region, rp });
         }
@@ -2171,6 +2204,7 @@ async function runLive(){
 
 /* Dispatch a single task descriptor with the given token. */
 function runTask(d, token){
+  if(d.kind === "usage" && d.provider === "appservice") return fetchUsage({ path:PLATFORM_APIS.web.path, ver:PLATFORM_APIS.web.version }, d.sub, d.region, token, "appservice");
   if(d.kind === "usage")   return fetchUsage({ path: d.provider==="network"?"Microsoft.Network":"Microsoft.Compute", ver: d.provider==="network"?NET_API:(RUN.apiVer||"2024-07-01") }, d.sub, d.region, token, d.provider);
   if(d.kind === "skus")    return fetchSkus(d.sub, d.region, token);
   if(d.kind === "quota")   return fetchQuota(d.sub, d.rp, d.region, token);
@@ -2322,22 +2356,37 @@ async function resumeRun(){
 function cancelResume(){ RUN = null; $("resumeBar").style.display = "none"; clearMsg($("liveMsg")); if(rows.length || quotaRequests.length) render(); else { if($("diffBtn")) $("diffBtn").disabled = false; if($("clearDataBtn")) $("clearDataBtn").disabled = false; } }
 
 async function fetchUsage(cfg, sub, region, token, provider){
-  const ctx = { provider, region, sub };
+  const ctx = { provider, region, sub, ...(provider === "appservice" ? { rp:"Microsoft.Web" } : {}) };
   const url = `https://management.azure.com/subscriptions/${sub}/providers/${cfg.path}/locations/${region}/usages?api-version=${cfg.ver}`;
   try{
-    const r = await fetchAllPages(url, token);
+    const r = await fetchAllPages(url, token, provider === "appservice");
     if(!r.ok) return { ok:false, ctx, error: r.error, status: r.status };
+    if(provider === "appservice" && (!r.value.length || !r.value.every(validAppServiceUsage))){
+      return { ok:false, ctx, error:"App Service Preview returned no quota counters or invalid usage/limit fields. Capacity is unknown; no zero or unlimited values have been inferred.", status:200 };
+    }
     return { ok:true, ctx, rows: normalize(r.value, provider, region, sub) };
   }catch(e){ const n = networkErrorInfo(e); return { ok:false, ctx, error: n.message, status: n.status }; }
 }
 
+function validAppServiceUsage(item){
+  const numeric = v => (typeof v === "number" || (typeof v === "string" && v.trim() !== "")) && Number.isFinite(Number(v)) && Number(v) >= 0;
+  return item && typeof item.name?.value === "string" && item.name.value.trim() &&
+    typeof item.unit === "string" && item.unit.trim() &&
+    numeric(item.currentValue) && numeric(item.limit) &&
+    (Number(item.limit) === 0 || Number.isFinite(Number(item.currentValue) / Number(item.limit) * 100));
+}
+function hasKnownLimit(r){
+  return r.limit > 0 || (r.provider === "appservice" && r.limit === 0);
+}
 function normalize(arr, provider, region, sub){
   return arr.map(item => {
     const label = item.name?.localizedValue || item.name?.value || "unknown";
     const key = item.name?.value || label;
     const current = Number(item.currentValue ?? item.usage ?? 0);
     const limit = Number(item.limit ?? 0);
-    return { sub, provider, region: item.location || region, label, key, current, limit, unit: item.unit || "Count", pct: pct(current, limit) };
+    return { sub, provider, region: item.location || region, label, key, current, limit, unit: item.unit || "Count",
+      pct:provider === "appservice" && limit > 0 ? current / limit * 100 : pct(current, limit),
+      ...(provider === "appservice" ? { rp:"Microsoft.Web" } : {}) };
   });
 }
 
@@ -3679,9 +3728,15 @@ function rowsFromImportArrays(arrays, region, sub){
     } else {
       const key = item.name?.value || item.localName || item.name || "unknown";
       const label = item.name?.localizedValue || (typeof item.name === "string" ? item.name : key);
+      const provider = guessProvider(item, String(key));
+      if(provider === "appservice"){
+        if(!validAppServiceUsage(item)) throw new Error("App Service import has invalid or missing quota usage/limit fields; capacity cannot be inferred.");
+        out.push(...normalize([item], provider, item.location || region || "\u2014", rsub));
+        return;
+      }
       const current = Number(item.currentValue ?? item.usage ?? 0);
       const limit = Number(item.limit ?? 0);
-      out.push({ sub: rsub, provider: guessProvider(item, String(key)), region: item.location || region || "\u2014", label, key, current, limit, unit: item.unit || "Count", pct: pct(current, limit) });
+      out.push({ sub: rsub, provider, region: item.location || region || "\u2014", label, key, current, limit, unit: item.unit || "Count", pct: pct(current, limit) });
     }
   }));
   return out;
@@ -3690,7 +3745,7 @@ function rowsFromImportArrays(arrays, region, sub){
    quota-<sub-guid>-compute-eastus.json  ->  eastus   (sub prefix optional). */
 function regionFromFilename(name){
   const base = String(name || "").replace(/\.json$/i, "");
-  const m = base.match(/quota-(?:[0-9a-fA-F-]{36}-)?(?:compute|network|storage|quota)-(.+)$/);
+  const m = base.match(/quota-(?:[0-9a-fA-F-]{36}-)?(?:compute|network|storage|quota|appservice)-(.+)$/);
   return m ? m[1] : "";
 }
 /* Pull the subscription GUID out of a script-written filename, if present. */
@@ -3706,7 +3761,10 @@ $("parseBtn").addEventListener("click", () => {
   const arrays = extractJsonArrays(raw);
   if(!arrays.length){ showMsg($("importMsg"), "Couldn't find a JSON array in the paste.", "err", "ic-error"); return; }
   subNames = {}; _quotaGroupApplied = false;
-  rows = rowsFromImportArrays(arrays, region, ""); quotaRequests = [];
+  let imported;
+  try { imported = rowsFromImportArrays(arrays, region, ""); }
+  catch(e){ showMsg($("importMsg"), e.message, "err", "ic-error"); return; }
+  rows = imported; quotaRequests = [];
   if(!rows.length){ showMsg($("importMsg"), "Parsed JSON but found no usage entries.", "err", "ic-error"); return; }
   isSample = false; failures = []; prevSnapshot = null;
   showMsg($("importMsg"), `Loaded ${rows.length} entries.`, "ok", "ic-check");
@@ -3730,7 +3788,8 @@ $("importFile").addEventListener("change", async (e) => {
     if(!arrays.length){ skipped.push(f.name); continue; }
     const region = regionFromFilename(f.name) || fallbackRegion;
     const sub = subFromFilename(f.name);
-    acc.push(...rowsFromImportArrays(arrays, region, sub));
+    try { acc.push(...rowsFromImportArrays(arrays, region, sub)); }
+    catch(e){ skipped.push(`${f.name}: ${e.message}`); continue; }
     okFiles++;
   }
   if(!acc.length){
@@ -3739,7 +3798,7 @@ $("importFile").addEventListener("change", async (e) => {
   }
   rows = acc; quotaRequests = [];
   isSample = false; failures = []; prevSnapshot = null;
-  const skipTxt = skipped.length ? ` \u00b7 ${skipped.length} file(s) skipped (no JSON array)` : "";
+  const skipTxt = skipped.length ? ` \u00b7 Skipped: ${skipped.join("; ")}` : "";
   showMsg($("importMsg"), `Loaded ${rows.length} entries from ${okFiles} file(s). Region/subscription read from each filename where present${skipTxt}.`, "ok", "ic-check");
   render();
 });
@@ -3756,6 +3815,9 @@ function extractJsonArrays(text){
   return out;
 }
 function guessProvider(item, key){
+  if(["compute","network","storage","quota","appservice"].includes(item.sourceProvider)) return item.sourceProvider;
+  if(item.resourceProvider === "Microsoft.Web" || /\/providers\/Microsoft\.Web\//i.test(item.id || "") ||
+    (item.unit === "Core Count" && /^Cores usage in /i.test(key))) return "appservice";
   const k = key.toLowerCase();
   if(/publicip|networkinterface|loadbalancer|virtualnetwork|nsg|securitygroup|route|gateway|dns/.test(k)) return "network";
   if(/storageaccount/.test(k)) return "storage";
@@ -3796,10 +3858,20 @@ function updateScripts(){
   bash += `    network) json=$(az network list-usages --location "$region" --subscription "$sub" -o json 2>/dev/null) ;;\n`;
   bash += `    storage) json=$(az storage account show-usage --location "$region" --subscription "$sub" -o json 2>/dev/null) ;;\n`;
   bash += `    quota)   json=$(az quota list --scope "/subscriptions/$sub/providers/Microsoft.Compute/locations/$region" -o json 2>/dev/null) ;;\n`;
+  bash += `    appservice)\n`;
+  bash += `      local url="https://management.azure.com/subscriptions/$sub/providers/Microsoft.Web/locations/$region/usages?api-version=${PLATFORM_APIS.web.version}" page pages=0\n`;
+  bash += `      json='[]'\n`;
+  bash += `      while [ -n "$url" ]; do\n`;
+  bash += `        if [[ "$url" != "https://management.azure.com/subscriptions/$sub/providers/Microsoft.Web/"* ]] || (( pages >= 50 )); then echo "App Service pagination blocked or incomplete: $sub / $region" >&2; return 1; fi\n`;
+  bash += `        page=$(az rest --method get --url "$url" -o json) || { echo "App Service collection failed: $sub / $region" >&2; return 1; }\n`;
+  bash += `        printf '%s' "$page" | jq -e '.value | type == "array"' >/dev/null || { echo "Invalid App Service response: $sub / $region" >&2; return 1; }\n`;
+  bash += `        json=$(jq -sc '.[0] + .[1].value' <(printf '%s' "$json") <(printf '%s' "$page")) || return 1\n`;
+  bash += `        url=$(printf '%s' "$page" | jq -r '.nextLink // empty'); ((pages++))\n`;
+  bash += `      done ;;\n`;
   bash += `  esac\n`;
   bash += `  [ -z "$json" ] && return 0\n`;
-  bash += `  printf '%s' "$json" | jq -c --arg sub "$sub" --arg loc "$region" \\\n`;
-  bash += `    'if type=="array" then . else (.value // []) end | map(. + {subscriptionId:$sub, location:$loc})' \\\n`;
+  bash += `  printf '%s' "$json" | jq -c --arg sub "$sub" --arg loc "$region" --arg prov "$prov" \\\n`;
+  bash += `    'if type=="array" then . else (.value // []) end | map(. + {subscriptionId:$sub, location:$loc, sourceProvider:$prov})' \\\n`;
   bash += `    > "$TMP/$sub-$prov-$region.json" 2>/dev/null && echo "  fetched $prov / $sub / $region" >&2\n`;
   bash += `}\n`;
   bash += `throttle() { while (( $(jobs -rp | wc -l) >= CONC )); do wait -n; done; }\n\n`;
@@ -3847,6 +3919,20 @@ function updateScripts(){
   ps += `    "network" { az network list-usages --location $t.Region --subscription $t.Sub -o json 2>$null }\n`;
   ps += `    "storage" { az storage account show-usage --location $t.Region --subscription $t.Sub -o json 2>$null }\n`;
   ps += `    "quota"   { az quota list --scope "/subscriptions/$($t.Sub)/providers/Microsoft.Compute/locations/$($t.Region)" -o json 2>$null }\n`;
+  ps += `    "appservice" {\n`;
+  ps += `      $prefix = "https://management.azure.com/subscriptions/$($t.Sub)/providers/Microsoft.Web/"\n`;
+  ps += `      $url = "$($prefix)locations/$($t.Region)/usages?api-version=${PLATFORM_APIS.web.version}"\n`;
+  ps += `      $values = @(); $pages = 0\n`;
+  ps += `      while ($url) {\n`;
+  ps += `        if (-not $url.StartsWith($prefix) -or $pages -ge 50) { throw "App Service pagination blocked or incomplete: $($t.Sub) / $($t.Region)" }\n`;
+  ps += `        $pageJson = az rest --method get --url $url -o json\n`;
+  ps += `        if ($LASTEXITCODE -ne 0) { throw "App Service collection failed: $($t.Sub) / $($t.Region)" }\n`;
+  ps += `        $page = $pageJson | ConvertFrom-Json -ErrorAction Stop\n`;
+  ps += `        if ($null -eq $page.value -or $page.value -isnot [System.Array]) { throw "Invalid App Service response: $($t.Sub) / $($t.Region)" }\n`;
+  ps += `        $values += $page.value; $url = $page.nextLink; $pages++\n`;
+  ps += `      }\n`;
+  ps += `      ConvertTo-Json -InputObject @($values) -Depth 20\n`;
+  ps += `    }\n`;
   ps += `  }\n`;
   ps += `  if (-not $json) { return }\n`;
   ps += `  $arr = $json | ConvertFrom-Json\n`;
@@ -3855,11 +3941,13 @@ function updateScripts(){
   ps += `  foreach ($item in $arr) {\n`;
   ps += `    $item | Add-Member -NotePropertyName subscriptionId -NotePropertyValue $t.Sub -Force\n`;
   ps += `    $item | Add-Member -NotePropertyName location -NotePropertyValue $t.Region -Force\n`;
+  ps += `    $item | Add-Member -NotePropertyName sourceProvider -NotePropertyValue $t.Prov -Force\n`;
   ps += `    $item\n`;
   ps += `  }\n`;
   ps += `  Write-Host "  fetched $($t.Prov) / $($t.Sub) / $($t.Region)"\n`;
   ps += `}\n\n`;
-  ps += `$json = @($results) | ConvertTo-Json -Depth 10 -AsArray\n`;
+  ps += `$records = @($results | Where-Object { $null -ne $_ })\n`;
+  ps += `$json = if ($records.Count) { $records | ConvertTo-Json -Depth 10 -AsArray } else { "[]" }\n`;
   if(save){
     ps += `$json | Out-File -Encoding utf8 $Out\n`;
     ps += `Write-Host ""\nWrite-Host "Done. $(@($results).Count) records -> $(Join-Path (Get-Location) $Out)"\n`;
@@ -4077,15 +4165,15 @@ function render(){
     badge.innerHTML = '<span class="dot"></span>' + icon("ic-bolt") + ' Sample data loaded &mdash; not real Azure data';
   } else {
     badge.className = "data-badge";
-    badge.innerHTML = '<span class="dot"></span>' + icon("ic-cloud") + ' Live data';
+    badge.innerHTML = '<span class="dot"></span>' + icon("ic-cloud") + ' Live data' + (rows.some(r => r.provider === "appservice") ? ' <span class="preview-badge">App Service Preview</span>' : "");
   }
   const regs = [...new Set(rows.map(r => r.region))].sort();
   $("fRegion").innerHTML = '<option value="">All</option>' + regs.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
   // Provider filter: only list providers actually present in the data
-  const provLabels = { compute:"Compute", network:"Network", storage:"Storage", quota:"Quota" };
+  const provLabels = { compute:"Compute", network:"Network", storage:"Storage", quota:"Quota", appservice:"App Service (Preview)" };
   const provs = [...new Set(rows.map(r => r.provider))].sort();
-  const provOrder = ["compute","network","storage","quota"].filter(pr => provs.includes(pr))
-    .concat(provs.filter(pr => !["compute","network","storage","quota"].includes(pr)));
+  const provOrder = ["compute","network","storage","quota","appservice"].filter(pr => provs.includes(pr))
+    .concat(provs.filter(pr => !["compute","network","storage","quota","appservice"].includes(pr)));
   const prevProv = $("fProvider").value;
   $("fProvider").innerHTML = '<option value="">All</option>' + provOrder.map(pr => `<option value="${esc(pr)}">${esc(provLabels[pr] || pr)}</option>`).join("");
   if(provOrder.includes(prevProv)) $("fProvider").value = prevProv;
@@ -4212,7 +4300,7 @@ function drawRisk(){
     const cls = r.pct>=90 ? "crit" : "warn";
     return `<tr>
       <td><span class="res-key" title="${esc(r.sub||"")}">${esc(subLabel(r.sub))}</span></td>
-      <td><span class="pill p-${r.provider}">${icon(provIcon[r.provider]||"ic-widgets")} ${r.provider}</span></td>
+      <td><span class="pill p-${r.provider}">${icon(provIcon[r.provider]||"ic-widgets")} ${r.provider === "appservice" ? "App Service (Preview)" : r.provider}</span></td>
       <td><span class="region-tag">${esc(r.region)}</span></td>
       <td><div class="res-name">${esc(r.label)}</div><div class="res-key">${esc(r.key)}</div></td>
       <td class="num-cell">${insUsedBar(r.current, r.limit)}</td>
@@ -4369,7 +4457,7 @@ function drawHeatmap(){
     const region = k.slice(0, k.indexOf("|")), provider = k.slice(k.indexOf("|")+1);
     heatCells[k] = {
       region, provider,
-      metrics: list.map(r => ({ label:r.label, pct:r.pct, current:Number(r.current)||0, limit:Number(r.limit)||0, remaining:(r.limit>0?(r.limit-r.current):null) })),
+      metrics: list.map(r => ({ label:r.label, pct:r.pct, current:Number(r.current)||0, limit:Number(r.limit)||0, remaining:(hasKnownLimit(r)?(r.limit-r.current):null) })),
       total: list.length,
       atRisk: list.filter(r => r.pct>=75 && r.pct<90).length,
       critical: list.filter(r => r.pct>=90).length
@@ -4386,7 +4474,7 @@ function drawHeatmap(){
   }
   panel.style.display = "block";
   const cellColor = p => p>=90 ? "var(--ms-danger)" : p>=75 ? "#c88a00" : p>=50 ? "#b3a100" : p>0 ? "var(--ms-success,#107c10)" : "var(--ms-border-strong)";
-  const head = `<div class="heat-cell heat-corner"></div>` + provs.map(pr => `<div class="heat-cell heat-head">${icon(provIcon[pr]||"ic-widgets")} <span>${esc(pr)}</span></div>`).join("");
+  const head = `<div class="heat-cell heat-corner"></div>` + provs.map(pr => `<div class="heat-cell heat-head">${icon(provIcon[pr]||"ic-widgets")} <span>${esc(pr === "appservice" ? "App Service (Preview)" : pr)}</span></div>`).join("");
   const body = regions.map(reg => {
     const cellsH = provs.map(pr => {
       const d = peak[reg+"|"+pr];
@@ -4404,7 +4492,7 @@ function drawHeatmap(){
 /* Shared tooltip HTML for a heatmap cell breakdown (used by tool + report). */
 let heatCells = {};
 function heatTipHtml(cell, pinned){
-  const provLabels = { compute:"Compute", network:"Network", storage:"Storage", quota:"Quota" };
+  const provLabels = { compute:"Compute", network:"Network", storage:"Storage", quota:"Quota", appservice:"App Service (Preview)" };
   const barColor = p => p>=90 ? "#d13438" : p>=75 ? "#c88a00" : p>=50 ? "#b3a100" : "#6fa80e";
   const top = cell.metrics.slice(0, 6);
   const rows = top.map(m => {
@@ -4417,7 +4505,7 @@ function heatTipHtml(cell, pinned){
   }).join("");
   const moreN = cell.metrics.length - top.length;
   return `${pinned?`<button class="htt-close" title="Close">${icon("ic-clear","ic")}</button>`:""}
-    <div class="htt-head">${icon(({compute:"ic-widgets",network:"ic-cloud",storage:"ic-storage",quota:"ic-tune"})[cell.provider]||"ic-widgets","ic")} ${esc(cell.region)} <span style="color:var(--ms-text-muted);font-weight:500">/ ${esc(provLabels[cell.provider]||cell.provider)}</span></div>
+    <div class="htt-head">${icon(({compute:"ic-widgets",network:"ic-cloud",storage:"ic-storage",quota:"ic-tune",appservice:"ic-cloud"})[cell.provider]||"ic-widgets","ic")} ${esc(cell.region)} <span style="color:var(--ms-text-muted);font-weight:500">/ ${esc(provLabels[cell.provider]||cell.provider)}</span></div>
     <div class="htt-sub">Peak <b>${cell.metrics[0]?cell.metrics[0].pct.toFixed(0):0}%</b> across ${cell.total} quota metric${cell.total===1?"":"s"}</div>
     <div class="htt-stats">
       <div class="htt-stat"><b>${cell.total}</b><span>Metrics</span></div>
@@ -4872,12 +4960,12 @@ function currentView(){
     if(cLab && !(r.label.toLowerCase().includes(cLab) || r.key.toLowerCase().includes(cLab))) return false;
     if(!isNaN(cCur) && r.current < cCur) return false;
     if(!isNaN(cLim) && (r.limit||0) < cLim) return false;
-    if(!isNaN(cRem) && (r.limit>0 ? (r.limit - r.current) : -Infinity) < cRem) return false;
+    if(!isNaN(cRem) && (hasKnownLimit(r) ? (r.limit - r.current) : -Infinity) < cRem) return false;
     if(cPct === "z"){ if(r.limit>0) return false; }
     else if(cPct){ if(r.limit<=0 || r.pct < Number(cPct)) return false; }
     return true;
   });
-  v.forEach(r => { r.remaining = r.limit>0 ? (r.limit - r.current) : null; });
+  v.forEach(r => { r.remaining = hasKnownLimit(r) ? (r.limit - r.current) : null; });
   v.sort((a,b) => {
     let x=a[sortKey], y=b[sortKey];
     if(typeof x === "string"){ x=x.toLowerCase(); y=String(y).toLowerCase(); }
@@ -4886,7 +4974,7 @@ function currentView(){
   return v;
 }
 
-const provIcon = { compute:"ic-widgets", network:"ic-cloud", storage:"ic-storage", quota:"ic-tune" };
+const provIcon = { compute:"ic-widgets", network:"ic-cloud", storage:"ic-storage", quota:"ic-tune", appservice:"ic-cloud" };
 function diffKey(r){ return `${r.sub||""}|${r.provider}|${r.region}|${r.key}`; }
 function deltaHtml(cur, prev){
   if(prev==null || !prevSnapshot) return "";
@@ -4900,7 +4988,7 @@ function rowHtml(r){
   const cls = r.limit<=0 ? "" : (p>=90?"crit":(p>=75?"warn":"ok"));
   const barW = r.limit<=0 ? 0 : Math.max(2, p);
   const pctTxt = r.limit<=0 ? "n/a" : p.toFixed(0)+"%";
-  const rem = r.limit>0 ? (r.limit - r.current) : null;
+  const rem = hasKnownLimit(r) ? (r.limit - r.current) : null;
   const remCls = rem==null ? "" : (rem<=0 ? "rem-crit" : (r.limit>0 && rem <= r.limit*0.1 ? "rem-warn" : ""));
   const prev = prevSnapshot ? prevSnapshot[diffKey(r)] : null;
   const isNew = prevSnapshot && !prev;
@@ -4908,11 +4996,11 @@ function rowHtml(r){
   const subCell = multiSub ? `<td class="sub-col"><span class="res-key" title="${esc(r.sub||"")}">${esc(subLabel(r.sub))}</span></td>` : "";
   return `<tr${isNew?' class="row-new"':""}>
     ${subCell}
-    <td class="col-provider"><span class="pill p-${r.provider}">${icon(provIcon[r.provider]||"ic-widgets")} ${r.provider}</span></td>
+    <td class="col-provider"><span class="pill p-${r.provider}">${icon(provIcon[r.provider]||"ic-widgets")} ${r.provider === "appservice" ? "App Service (Preview)" : r.provider}</span></td>
     <td class="col-region"><span class="region-tag">${esc(r.region)}</span></td>
     <td class="col-label"><div class="res-name">${esc(r.label)}${isNew?' <span class="new-tag">NEW</span>':""}${skuPills(r)}</div><div class="res-key">${esc(r.key)}</div></td>
     <td class="num-cell col-current">${fmt(r.current)}${deltaHtml(r.current, prev?prev.current:null)}</td>
-    <td class="num-cell col-limit">${r.limit>0?fmt(r.limit):"\u2014"}${deltaHtml(r.limit, prev?prev.limit:null)}</td>
+    <td class="num-cell col-limit">${hasKnownLimit(r)?fmt(r.limit):"\u2014"}${deltaHtml(r.limit, prev?prev.limit:null)}</td>
     <td class="num-cell col-remaining ${remCls}"${r.vmsRemaining!=null?` title="\u2248${fmt(r.vmsRemaining)} VMs deployable at ${fmt(r.vcpus)} vCPU each"`:""}>${rem==null?"\u2014":fmt(rem)}${deltaHtml(rem, remPrev)}${r.vmsRemaining!=null?`<span class="vms-hint">\u2248${fmt(r.vmsRemaining)} VMs</span>`:""}</td>
     <td class="col-unit"><span class="unit-tag">${esc(r.unit||"Count")}</span></td>
     <td class="col-pct"><div class="bar ${cls}"><span style="width:${barW}%"></span><em>${pctTxt}</em></div></td>
@@ -5175,7 +5263,7 @@ $("csvBtn").addEventListener("click", () => {
   const head = (multiSub ? ["Subscription"] : []).concat(["Provider","Region","Resource","Key","Used","Limit","Remaining","PercentUsed","Unit"]);
   const lines = [head.join(",")];
   v.forEach(r => {
-    const base = [r.provider, r.region, r.label, r.key, r.current, r.limit>0?r.limit:"", r.limit>0?(r.limit-r.current):"", r.limit>0?r.pct.toFixed(1):"", r.unit];
+    const base = [r.provider, r.region, r.label, r.key, r.current, hasKnownLimit(r)?r.limit:"", hasKnownLimit(r)?(r.limit-r.current):"", r.limit>0?r.pct.toFixed(1):"", r.unit];
     const row = (multiSub ? [subLabel(r.sub)] : []).concat(base)
       .map(x => { const s=String(x); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; });
     lines.push(row.join(","));
@@ -5239,7 +5327,7 @@ function buildPlatformReportHtml(){
   <h1>Azure Platform-Service Quota &amp; Usage</h1><div class="meta">Generated ${esc(when)} &middot; ${fmt(view.length)} displayed quota counter(s)</div>
   <div class="note">Quota/current-limit counters from Azure Resource Manager. These are not Azure Monitor performance or consumption metrics.</div>
   <section><table><thead><tr><th>Subscription</th><th>Provider</th><th>Region</th><th>Resource / account</th><th>Quota</th><th>Used</th><th>Limit</th><th>Remaining</th><th>% Used</th><th>Unit</th></tr></thead><tbody>${rowsHtml}</tbody></table></section>
-  ${failuresHtml}</main></body></html>`;
+  ${failuresHtml}</main><footer style="text-align:center;color:#616161;font-size:11.5px;margin-top:24px">Version ${esc(APP_VERSION)}</footer></body></html>`;
 }
 
 function exportPlatformHtml(){
@@ -5437,6 +5525,7 @@ async function buildReportHtml(){
   .pill{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600}
   .pill .ic{width:13px;height:13px}
   .p-compute{background:#e3f0fb;color:var(--accent-blue)}
+  .p-appservice{background:var(--chip);color:var(--accent-blue)}
   .p-network{background:#eef6db;color:#5c8a0b}
   .p-storage{background:#fdf1d6;color:#a6740a}
   .p-quota{background:#efe8fb;color:#6b4fb0}
@@ -5914,12 +6003,13 @@ ${sprite}
 <header class="hero"><div class="hero-in">
   <h1>Azure Quota &amp; Usage Report</h1>
   <div class="meta">Subscription <b>${esc(sub)}</b> &middot; generated <b>${esc(when)}</b> &middot; source: public ARM API (customer-scoped)${hidden>0?` &middot; <b>${fmt(data.length)}</b> in-use of <b>${fmt(totalTracked)}</b> quotas (zero-usage hidden)`:""}</div>
+  ${data.some(r => r.provider === "appservice") ? '<div class="meta">App Service Quota (Preview): Microsoft.Web regional counters only. Quota headroom does not guarantee deployment capacity; Microsoft.Quota pending requests and VM analysis do not apply.</div>' : ""}
 </div></header>
 <main class="wrap">
 ${mainSections}
 </main>
 <button id="b2t" class="b2t" title="Back to top">&#8593;</button>
-<footer>Generated by the Azure Quota &amp; Usage Report tool &middot; data from <code>management.azure.com</code> &middot; Portal-equivalent.</footer>
+<footer>Version ${esc(APP_VERSION)} &middot; Generated by the Azure Quota &amp; Usage Report tool &middot; data from <code>management.azure.com</code> &middot; Portal-equivalent.</footer>
 <script id="rdata-gz" type="text/plain">${gz}<\/script>
 <script>(${reportScript()})()<\/script>
 </body></html>`;
@@ -5932,8 +6022,9 @@ function reportScript(){
 /* Self-contained report runtime. Embedded via reportMain.toString() and executed as an IIFE. */
 function reportMain(){
   "use strict";
-  var provIcon={compute:"ic-widgets",network:"ic-cloud",storage:"ic-storage",quota:"ic-tune"};
-  var provLbl={compute:"Compute",network:"Network",storage:"Storage",quota:"Quota"};
+  var provIcon={compute:"ic-widgets",network:"ic-cloud",storage:"ic-storage",quota:"ic-tune",appservice:"ic-cloud"};
+  var provLbl={compute:"Compute",network:"Network",storage:"Storage",quota:"Quota",appservice:"App Service (Preview)"};
+  function hasKnownLimit(r){return r.limit>0||(r.provider==="appservice"&&r.limit===0);}
   var IGNORE={networkwatchers:1};
   var SUBNAMES={};
   function subLabel(id){ if(!id) return "\u2014"; return SUBNAMES[id]||id; }
@@ -6364,7 +6455,7 @@ function reportMain(){
       var list=cellRows[k].slice().sort(function(a,b){return b.pct-a.pct;});
       var bar=k.indexOf("|");
       heatCells[k]={ region:k.slice(0,bar), provider:k.slice(bar+1),
-        metrics:list.map(function(r){return {label:r.label,pct:r.pct,current:Number(r.current)||0,limit:Number(r.limit)||0,remaining:(r.limit>0?(r.limit-r.current):null)};}),
+        metrics:list.map(function(r){return {label:r.label,pct:r.pct,current:Number(r.current)||0,limit:Number(r.limit)||0,remaining:(hasKnownLimit(r)?(r.limit-r.current):null)};}),
         total:list.length, atRisk:list.filter(function(r){return r.pct>=75&&r.pct<90;}).length, critical:list.filter(function(r){return r.pct>=90;}).length };
     });
     var allRegions=uniq(withLimit.map(function(r){return r.region;})).sort();
@@ -6395,7 +6486,7 @@ function reportMain(){
   }
   var heatCells={};
   function heatTipHtml(cell, pinned){
-    var provLabels={compute:"Compute",network:"Network",storage:"Storage",quota:"Quota"};
+    var provLabels={compute:"Compute",network:"Network",storage:"Storage",quota:"Quota",appservice:"App Service (Preview)"};
     function barColor(p){return p>=90?"#d13438":p>=75?"#c88a00":p>=50?"#b3a100":"#6fa80e";}
     var top=cell.metrics.slice(0,6);
     var rows=top.map(function(m){
@@ -6405,7 +6496,7 @@ function reportMain(){
         +'<span class="htt-bar"><i style="width:'+Math.max(2,Math.min(100,m.pct)).toFixed(0)+'%;background:'+barColor(m.pct)+'"></i></span></div>';
     }).join("");
     var moreN=cell.metrics.length-top.length;
-    var picn={compute:"ic-widgets",network:"ic-cloud",storage:"ic-storage",quota:"ic-tune"}[cell.provider]||"ic-widgets";
+    var picn={compute:"ic-widgets",network:"ic-cloud",storage:"ic-storage",quota:"ic-tune",appservice:"ic-cloud"}[cell.provider]||"ic-widgets";
     return (pinned?'<button class="htt-close" title="Close">'+icon("ic-clear",14)+'</button>':'')
       +'<div class="htt-head">'+icon(picn,15)+' '+esc(cell.region)+' <span style="color:var(--muted);font-weight:500">/ '+esc(provLabels[cell.provider]||cell.provider)+'</span></div>'
       +'<div class="htt-sub">Peak <b>'+(cell.metrics[0]?cell.metrics[0].pct.toFixed(0):0)+'%</b> across '+cell.total+' quota metric'+(cell.total===1?"":"s")+'</div>'
@@ -6722,7 +6813,7 @@ function reportMain(){
     cols.push({key:"region",label:"Region",icon:"ic-place",filter:1,get:function(r){return r.region;},cell:function(r){return '<td>'+regCell(r.region)+'</td>';}});
     cols.push({key:"label",label:"Resource",icon:"ic-table",filter:1,get:function(r){return r.label;},cell:function(r){return '<td><div class="rn">'+esc(r.label)+skuPill(r)+'</div><div class="rk">'+esc(r.key)+'</div></td>';}});
     cols.push({key:"current",label:"Used",icon:"ic-bolt",num:1,sortVal:function(r){return r.current;},cell:function(r){return '<td class="num">'+fmt(r.current)+'</td>';}});
-    cols.push({key:"limit",label:"Limit",icon:"ic-shield",num:1,sortVal:function(r){return r.limit>0?r.limit:-1;},cell:function(r){return '<td class="num">'+(r.limit>0?fmt(r.limit):"\u2014")+'</td>';}});
+    cols.push({key:"limit",label:"Limit",icon:"ic-shield",num:1,sortVal:function(r){return hasKnownLimit(r)?r.limit:-1;},cell:function(r){return '<td class="num">'+(hasKnownLimit(r)?fmt(r.limit):"\u2014")+'</td>';}});
     cols.push({key:"remaining",label:"Remaining",icon:"ic-inventory",num:1,sortVal:function(r){return r.remaining==null?-Infinity:r.remaining;},cell:function(r){var rem=r.remaining;var rc=rem==null?"":(rem<=0?"rem-crit":(rem<=r.limit*0.1?"rem-warn":""));return '<td class="num '+rc+'"'+(r.vmsRemaining!=null?' title="\u2248'+fmt(r.vmsRemaining)+' VMs at '+fmt(r.vcpus)+' vCPU each"':'')+'>'+(rem==null?"\u2014":fmt(rem))+(r.vmsRemaining!=null?'<span class="vmsh">\u2248'+fmt(r.vmsRemaining)+' VMs</span>':'')+'</td>';}});
     cols.push({key:"pct",label:"% Used",icon:"ic-chart",num:1,sortVal:function(r){return r.pct;},cell:function(r){return '<td>'+usageBar(r)+'</td>';}});
     var tree=true;   // Quota table is always a Subscription → Region tree.
@@ -6925,7 +7016,7 @@ function reportMain(){
     var INV=payload.inventory||[];
     var WASTE=payload.wasteSignals||{};
     var RESTR=payload.restrictions||[];
-    DATA.forEach(function(r){r.remaining=r.limit>0?(r.limit-r.current):null;});
+    DATA.forEach(function(r){r.remaining=hasKnownLimit(r)?(r.limit-r.current):null;});
 
     var n=DATA.length;
     var totalTracked=payload.total||n;
@@ -7173,6 +7264,7 @@ function savePrefs(){
       api: $("apiVer").value,
       regions: [...selectedRegions],
       provs,
+      quotaRps: [...document.querySelectorAll(".quotaRpChk:checked")].map(c => c.value),
       parallel: $("parallel") ? $("parallel").value : "12",
       theme: document.documentElement.getAttribute("data-theme") || "light"
     }));
@@ -7189,6 +7281,9 @@ function restorePrefs(){
     document.querySelectorAll(".provChk").forEach(c => c.checked = p.provs.includes(c.value));
     const q = $("provQuota"); if(q) $("quotaSub").classList.toggle("show", q.checked);
   }
+  if(Array.isArray(p.quotaRps)){
+    document.querySelectorAll(".quotaRpChk").forEach(c => c.checked = p.quotaRps.includes(c.value));
+  }
   if(Array.isArray(p.regions) && p.regions.length){
     selectedRegions.clear(); p.regions.forEach(r => selectedRegions.add(r));
     syncChips(); updateGeoCounts();
@@ -7204,6 +7299,7 @@ if($("parallel")) $("parallel").addEventListener("change", () => {
   savePrefs();
 });
 document.querySelectorAll(".provChk").forEach(c => c.addEventListener("change", savePrefs));
+document.querySelectorAll(".quotaRpChk").forEach(c => c.addEventListener("change", savePrefs));
 ["selAll","selNone"].forEach(id => { const el=$(id); if(el) el.addEventListener("click", () => setTimeout(savePrefs,0)); });
 $("regionChips").addEventListener("click", () => setTimeout(savePrefs,0));
 $("themeToggle").addEventListener("click", () => setTimeout(savePrefs,0));

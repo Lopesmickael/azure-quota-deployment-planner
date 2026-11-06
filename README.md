@@ -30,6 +30,16 @@ Everything runs in your browser. No backend, no data leaves your machine, and th
 
 The token is used only from your browser to call `management.azure.com` directly and is valid for ~60–75 minutes.
 
+### Preview regions
+
+**Southeast Asia 3 (`southeastasia3`)** and **Taiwan North (`taiwannorth`)** are selectable in the Asia Pacific group with a **Preview** label. Region selectors and HTML reports retain that label; API requests, collector scripts, imports, and CSV data keep the unmodified Azure region names.
+
+Preview status is maintained in `PREVIEW_REGIONS` in `index.html`. Once Microsoft confirms general availability, remove the region from that array; keep it in `ALL_REGIONS` and its geography/country mappings. Newly generated reports use the updated status; existing downloaded reports retain their original labels.
+
+Microsoft's [region list](https://learn.microsoft.com/en-us/azure/reliability/regions-list) identifies both as Preview and directs customers to their Microsoft representative for available services and access. Selecting a region here does not enable it for your subscription. The [subscription locations API](https://learn.microsoft.com/en-us/rest/api/resources/subscriptions/list-locations?view=rest-resources-2022-12-01) lists locations, but individual resource providers can support only a subset. The documented [App Service regional usages API](https://learn.microsoft.com/en-us/rest/api/appservice/get-usages-in-location/list?view=rest-appservice-2024-11-01) accepts a region name; documentation alone does not establish whether either preview region currently returns counters for your subscription.
+
+To check actual App Service quota access, select either region and **Microsoft.Web — App Service (Preview)**, then generate a live report with your subscription and ARM token. Successful counters confirm that endpoint is accessible for that subscription, not deployment readiness. Endpoint failures remain visible; an error or empty App Service response is not treated as zero usage or unlimited capacity. In Script generator, no region selection still queries all listed regions, now including these two; select specific regions to avoid preview endpoint attempts.
+
 ### App Service Quota (Preview)
 
 In **Live fetch → Resource providers**, enable **Microsoft.Quota**, then select **Microsoft.Web — App Service (Preview)** under **Quota scopes to query**. Use the existing subscription, token, and region inputs and select **Generate report**. App Service counters appear alongside the other providers in the existing report, filters, risk view, and HTML/CSV exports.

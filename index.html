@@ -176,6 +176,7 @@ textarea.mono { font-family: Consolas, "Courier New", Courier, monospace; font-s
   display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden;
 }
 .chip .rname { overflow: hidden; text-overflow: ellipsis; }
+.chip .preview-badge { flex: 0 0 auto; font-size: 9px; padding: 0 3px; }
 .chip .rflag { width: 20px; height: 15px; flex: 0 0 auto; margin-left: 3px; border-radius: 2px; display: block; object-fit: cover; box-shadow: 0 0 0 1px rgba(0,0,0,.08); }
 .chip .rflag-sq { width: 17px; height: 17px; box-shadow: none; border-radius: 50%; }
 .chip .rflag-cc { font-size: 10px; font-weight: 700; color: var(--ms-text-soft); background: var(--ms-surface-soft); border: 1px solid var(--ms-border); border-radius: 2px; padding: 1px 3px; margin-left: 3px; flex: 0 0 auto; line-height: 1.1; }
@@ -1400,10 +1401,10 @@ a { color: var(--ms-link); }
 <script>
 "use strict";
 
-const APP_VERSION = "2.3";
+const APP_VERSION = "2.3.1";
 document.getElementById("appVersion").textContent = `Version ${APP_VERSION}`;
 
-// Azure public-cloud regions — aligned to Microsoft's official regions-list (verified 2026-07-02)
+// Azure public-cloud regions — aligned to Microsoft's official regions-list (verified 2026-11-06)
 const ALL_REGIONS = [
   // Americas
   "brazilsouth","brazilsoutheast","canadacentral","canadaeast","centralus","chilecentral",
@@ -1417,8 +1418,10 @@ const ALL_REGIONS = [
   // Asia Pacific
   "australiacentral","australiacentral2","australiaeast","australiasoutheast","centralindia","eastasia",
   "indiasouthcentral","indonesiacentral","japaneast","japanwest","koreacentral","koreasouth","malaysiawest",
-  "newzealandnorth","southeastasia","southindia","westindia"
+  "newzealandnorth","southeastasia","southeastasia3","southindia","taiwannorth","westindia"
 ];
+const PREVIEW_REGIONS = ["southeastasia3","taiwannorth"];
+function regionLabel(r){ return r + (PREVIEW_REGIONS.includes(r) ? " (Preview)" : ""); }
 // Safety-net region set used only when auto-detection (Resource Graph) is unavailable and
 // the user hasn't picked any regions — a small, geographically spread default.
 const FALLBACK_REGIONS = ["eastus","eastus2","westus2","westeurope","southeastasia","australiaeast"];
@@ -1733,7 +1736,7 @@ function updateTokenChip(){
 $("token").addEventListener("input", updateTokenChip);
 setInterval(updateTokenChip, 30000); // live-decrement the countdown
 const GEO = {
-  "APAC": ["australiacentral","australiacentral2","australiaeast","australiasoutheast","centralindia","eastasia","indiasouthcentral","indonesiacentral","japaneast","japanwest","koreacentral","koreasouth","malaysiawest","newzealandnorth","southeastasia","southindia","westindia"],
+  "APAC": ["australiacentral","australiacentral2","australiaeast","australiasoutheast","centralindia","eastasia","indiasouthcentral","indonesiacentral","japaneast","japanwest","koreacentral","koreasouth","malaysiawest","newzealandnorth","southeastasia","southeastasia3","southindia","taiwannorth","westindia"],
   "EMEA": ["austriaeast","belgiumcentral","denmarkeast","francecentral","francesouth","germanynorth","germanywestcentral","italynorth","northeurope","norwayeast","norwaywest","polandcentral","spaincentral","swedencentral","swedensouth","switzerlandnorth","switzerlandwest","uksouth","ukwest","westeurope","israelcentral","qatarcentral","uaecentral","uaenorth","southafricanorth","southafricawest"],
   "AMER": ["brazilsouth","brazilsoutheast","canadacentral","canadaeast","centralus","chilecentral","eastus","eastus2","mexicocentral","northcentralus","southcentralus","westcentralus","westus","westus2","westus3"]
 };
@@ -1746,13 +1749,14 @@ function planRegionOptions(regions, selected){
   const order = ["AMER","EMEA","APAC","Other"];
   return order.filter(g => groups[g] && groups[g].length).map(g =>
     `<optgroup label="${esc(GEO_FULL[g]||g)}">` +
-    groups[g].sort().map(r => `<option value="${esc(r)}"${r===selected?" selected":""}>${esc(r)}</option>`).join("") +
+    groups[g].sort().map(r => `<option value="${esc(r)}"${r===selected?" selected":""}>${esc(regionLabel(r))}</option>`).join("") +
     `</optgroup>`
   ).join("");
 }
 
 /* region -> ISO country code (for flag), southeastasia handled specially (ASEAN) */
 const FLAG_DATA = {
+  tw:"iVBORw0KGgoAAAANSUhEUgAAACgAAAAbCAMAAAA5zj1cAAAAPFBMVEX+AAAAAJSAAEqbm9YNDZm2tuH+/v8uLqdOTrQ/P651dcUeHqBtbcHBwebs7PeBAUrn5/Tm5vTT0+3Q0OxOVgUiAAAAaUlEQVQ4y+2RSwqAMAxEq5NpE+vf+9/VunClkgoufQSyeQwkE5obwh1vxdSkMjUi+56+KJ1iGKCdeImJc4zLGfksGhgLhHmJGYeI7B4DchxJuMeIbMBalvseM1XTqmayfFTh1F4JPz817I2ZAvisYi9BAAAAAElFTkSuQmCC",
   au:"iVBORw0KGgoAAAANSUhEUgAAACgAAAAUCAMAAADImI+JAAAAdVBMVEUBIWn+/v8LKm8rRoLsS2lZa5sCI2rkACvAyNojP317jLGrtc2qtc3FzN1fc6FBWY/5w83ecIr+8vQRL3P5x9DY3ejU2OVeZpZLVIn709oYNndNZJacqcWLmrra3unVZ4Xy9Pj22uFEXJHIz94VM3XUZYPb3+rlcwqvAAAAz0lEQVQoz7WQyRKDIBBEB2STRHHfTdQs//+JQVxiSlNFDunLAPOomW4gycVnAHDi/KwLoyEJ4EjFgyQpXcBcY54C+IpmdAQNNmxavv8+C62sLyPEeVRGXTbelx72BF5BfqC16bpgB25lRnd6KucoKvuP0UaOdObT4CUkzEczNA3ItZheq2oxhKYUlMHmeNiK4ps3+7jXzFSN0W3g/jMgY5WSwS+i1BLcBrS4c6x+xrJpZGxDtgi1NpwSCAlls44rxG5vfEnxHozjvUFaw//0ApepC3HnUeodAAAAAElFTkSuQmCC",
   in:"iVBORw0KGgoAAAANSUhEUgAAACgAAAAbBAMAAAD8PtBdAAAAMFBMVEUEajj/aCD////f3/GpqNhPTa7MzOiOjMthX7f5+fxubLyFg8b4+Py+veF1dMD9/f41r+HyAAAATElEQVQoz2MQxAIYhoqgEhRoloZPgrHhgqZuKcEYgotNnK3QBfXb/J5koAsq722NuG2Ern2Z95YsDDOLTZzNMQRPuKX0YAiiuHMoAwA5/S6KfoLQ6QAAAABJRU5ErkJggg==",
   hk:"iVBORw0KGgoAAAANSUhEUgAAACgAAAAbCAMAAAA5zj1cAAAAVFBMVEXuHCX1eH794+T3mJzyU1rxRUv2io7/////+fn//v7uJC32g4j7vsH5pqn6t7rwOkL81dfzXGL/9PX0bnT3kJX7y8393N3+7e71fYLzY2nwNT35sLPTyISVAAAAmUlEQVQYGe3B13XDMBAEwEXcOyQSzJb679NugBC/9TyDbzeZjieycsIDQUmPBxyrVnwQABS7MPacPe75eWs/zcq188+ccKeTIpdcUeczkxF3JtXK1Znc3xSJBrccRawPoRlXPEaM1aOG1S024YOw+lZWXSrGXgsp+1sOTRiKdMp4SqPHSD94sqRNyAkjYZfZAHjZgme2hH/AL5JVBleYonGCAAAAAElFTkSuQmCC",
@@ -1789,7 +1793,7 @@ const REGION_CC = {
   australiacentral:"AU",australiacentral2:"AU",australiaeast:"AU",australiasoutheast:"AU",
   centralindia:"IN",indiasouthcentral:"IN",southindia:"IN",westindia:"IN",
   eastasia:"HK",indonesiacentral:"ID",japaneast:"JP",japanwest:"JP",koreacentral:"KR",koreasouth:"KR",
-  malaysiawest:"MY",newzealandnorth:"NZ",
+  malaysiawest:"MY",southeastasia3:"MY",newzealandnorth:"NZ",taiwannorth:"TW",
   austriaeast:"AT",belgiumcentral:"BE",denmarkeast:"DK",francecentral:"FR",francesouth:"FR",
   germanynorth:"DE",germanywestcentral:"DE",italynorth:"IT",northeurope:"IE",norwayeast:"NO",norwaywest:"NO",
   polandcentral:"PL",spaincentral:"ES",swedencentral:"SE",swedensouth:"SE",switzerlandnorth:"CH",switzerlandwest:"CH",
@@ -1804,7 +1808,7 @@ const REGION_GEO = {
   // Asia Pacific
   australiacentral:"apac",australiacentral2:"apac",australiaeast:"apac",australiasoutheast:"apac",
   centralindia:"apac",indiasouthcentral:"apac",southindia:"apac",westindia:"apac",jioindiawest:"apac",jioindiacentral:"apac",
-  eastasia:"apac",southeastasia:"apac",indonesiacentral:"apac",japaneast:"apac",japanwest:"apac",
+  eastasia:"apac",southeastasia:"apac",southeastasia3:"apac",indonesiacentral:"apac",japaneast:"apac",japanwest:"apac",
   koreacentral:"apac",koreasouth:"apac",malaysiawest:"apac",newzealandnorth:"apac",taiwannorth:"apac",taiwannorthwest:"apac",
   // Europe
   austriaeast:"europe",belgiumcentral:"europe",denmarkeast:"europe",francecentral:"europe",francesouth:"europe",
@@ -1851,7 +1855,9 @@ function buildRegionGroups(){
     groups[g].forEach(r => {
       const c = document.createElement("span");
       c.className = "chip"; c.dataset.r = r;
-      c.innerHTML = regionFlagHtml(r) + `<span class="rname">${r}</span>`;
+      const preview = PREVIEW_REGIONS.includes(r);
+      c.title = regionLabel(r) + (preview ? ": API availability depends on your subscription and selected service. Contact your Microsoft representative for preview access." : "");
+      c.innerHTML = regionFlagHtml(r) + `<span class="rname">${r}</span>` + (preview ? '<span class="preview-badge">Preview</span>' : "");
       c.addEventListener("click", () => {
         if(selectedRegions.has(r)){ selectedRegions.delete(r); c.classList.remove("on"); }
         else { selectedRegions.add(r); c.classList.add("on"); }
@@ -2788,7 +2794,7 @@ function renderPlatformTable(){
   $("platformBody").innerHTML = view.length ? view.map(row => `<tr>
     <td class="mono">${esc(row.sub)}</td>
     <td>${esc(row.providerLabel)}</td>
-    <td><span class="region-tag">${esc(row.region)}</span></td>
+    <td><span class="region-tag">${esc(regionLabel(row.region))}</span></td>
     <td class="scope-cell">${esc(row.scope)}</td>
     <td><span class="rk">${esc(row.label)}</span><div class="muted" style="font-size:11px">${esc(row.key)}</div></td>
     <td class="num-cell">${fmt(row.current)}</td>
@@ -2822,14 +2828,14 @@ function renderPlatformResults(){
   const regionSelect = $("platformRegionFilter");
   const oldRegion = regionSelect.value;
   const regionValues = [...new Set(platformRows.map(r => r.region).filter(r => r !== "all"))].sort();
-  regionSelect.innerHTML = '<option value="">All regions</option>' + regionValues.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+  regionSelect.innerHTML = '<option value="">All regions</option>' + regionValues.map(r => `<option value="${esc(r)}">${esc(regionLabel(r))}</option>`).join("");
   if(regionValues.includes(oldRegion)) regionSelect.value = oldRegion;
 
   const failurePanel = $("platformFailurePanel");
   failurePanel.hidden = !platformFailures.length;
   $("platformFailureTitle").textContent = `${platformFailures.length} endpoint failure${platformFailures.length===1?"":"s"}`;
   $("platformFailureBody").innerHTML = platformFailures.map(f => `<tr>
-    <td>${esc(PLATFORM_APIS[f.provider]?.label || f.provider)}</td><td>${esc(f.region)}</td><td class="mono">${esc(f.sub)}</td>
+    <td>${esc(PLATFORM_APIS[f.provider]?.label || f.provider)}</td><td>${esc(regionLabel(f.region))}</td><td class="mono">${esc(f.sub)}</td>
     <td>${esc(f.scope)}</td><td>${esc(f.status)}</td><td>${esc(f.error)}</td>
   </tr>`).join("");
   renderPlatformTable();
@@ -4168,7 +4174,7 @@ function render(){
     badge.innerHTML = '<span class="dot"></span>' + icon("ic-cloud") + ' Live data' + (rows.some(r => r.provider === "appservice") ? ' <span class="preview-badge">App Service Preview</span>' : "");
   }
   const regs = [...new Set(rows.map(r => r.region))].sort();
-  $("fRegion").innerHTML = '<option value="">All</option>' + regs.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join("");
+  $("fRegion").innerHTML = '<option value="">All</option>' + regs.map(r => `<option value="${esc(r)}">${esc(regionLabel(r))}</option>`).join("");
   // Provider filter: only list providers actually present in the data
   const provLabels = { compute:"Compute", network:"Network", storage:"Storage", quota:"Quota", appservice:"App Service (Preview)" };
   const provs = [...new Set(rows.map(r => r.provider))].sort();
@@ -4233,7 +4239,7 @@ function drawZoneMap(){
   const regions = [...new Set(zoneMaps.map(z => z.region))].sort();
   if(zoneRegionSel == null || regions.indexOf(zoneRegionSel) < 0) zoneRegionSel = regions[0];
   if($("zoneSub")) $("zoneSub").textContent = `\u2014 ${regions.length} region(s), ${new Set(zoneMaps.map(z=>z.sub)).size} sub(s)`;
-  const sel = `<label class="restrict-region-sel"><span class="rsel-lab">${icon("ic-place")} Region</span><select id="zoneRegionSel">${regions.map(rg => `<option value="${esc(rg)}"${rg===zoneRegionSel?" selected":""}>${esc(rg)}</option>`).join("")}</select></label>`;
+  const sel = `<label class="restrict-region-sel"><span class="rsel-lab">${icon("ic-place")} Region</span><select id="zoneRegionSel">${regions.map(rg => `<option value="${esc(rg)}"${rg===zoneRegionSel?" selected":""}>${esc(regionLabel(rg))}</option>`).join("")}</select></label>`;
   const subsHere = zoneMaps.filter(z => z.region === zoneRegionSel);
   const rowsH = subsHere.map(zm => {
     const cells = ["1","2","3"].map(lz => {
@@ -4242,7 +4248,7 @@ function drawZoneMap(){
     }).join("");
     return `<tr><td class="mono" title="${esc(zm.sub||"")}">${esc(subNames[zm.sub] || zm.subName || zm.sub)}</td>${cells}</tr>`;
   }).join("");
-  const head = `<div class="zone-rhead" style="margin-top:10px"><span class="region-tag">${esc(zoneRegionSel)}</span> <span class="muted" style="font-size:11.5px">${fmt(subsHere.length)} subscription${subsHere.length===1?"":"s"}</span></div>`;
+  const head = `<div class="zone-rhead" style="margin-top:10px"><span class="region-tag">${esc(regionLabel(zoneRegionSel))}</span> <span class="muted" style="font-size:11.5px">${fmt(subsHere.length)} subscription${subsHere.length===1?"":"s"}</span></div>`;
   const table = `${head}<div class="table-scroll" style="margin-bottom:14px"><table class="zone-table"><thead><tr><th>Subscription</th><th>Logical Zone 1</th><th>Logical Zone 2</th><th>Logical Zone 3</th></tr></thead><tbody>${rowsH}</tbody></table></div>`;
   $("zoneBody").innerHTML = `<div class="restrict-toggles" style="margin-bottom:10px">${sel}</div>` + table;
   const rsel = $("zoneRegionSel");
@@ -4260,7 +4266,7 @@ function drawFailures(){
   failures.forEach(f => { const k = f.status || "err"; byKind[k] = (byKind[k]||0)+1; });
   $("failBody").innerHTML = failures.slice(0, 200).map(f => `<tr>
     <td><span class="pill p-${esc(f.provider)}">${esc(f.provider)}${f.rp?(" / "+esc(f.rp.replace("Microsoft.",""))):""}</span></td>
-    <td><span class="region-tag">${esc(f.region)}</span></td>
+    <td><span class="region-tag">${esc(regionLabel(f.region))}</span></td>
     <td class="mono muted" title="${esc(f.sub||"")}">${esc(f.sub?subLabel(f.sub):"\u2014")}</td>
     <td><span class="status-badge s-${esc(String(f.status)||"err")}">${esc(String(f.status)||"ERR")}</span></td>
     <td>${esc(f.error)}</td>
@@ -4301,7 +4307,7 @@ function drawRisk(){
     return `<tr>
       <td><span class="res-key" title="${esc(r.sub||"")}">${esc(subLabel(r.sub))}</span></td>
       <td><span class="pill p-${r.provider}">${icon(provIcon[r.provider]||"ic-widgets")} ${r.provider === "appservice" ? "App Service (Preview)" : r.provider}</span></td>
-      <td><span class="region-tag">${esc(r.region)}</span></td>
+      <td><span class="region-tag">${esc(regionLabel(r.region))}</span></td>
       <td><div class="res-name">${esc(r.label)}</div><div class="res-key">${esc(r.key)}</div></td>
       <td class="num-cell">${insUsedBar(r.current, r.limit)}</td>
       <td class="pct-cell"><span class="pct-badge ${cls}">${r.pct.toFixed(0)}%</span></td>
@@ -4482,7 +4488,7 @@ function drawHeatmap(){
       const op = 0.18 + Math.min(1, d.pct/100)*0.82;
       return `<div class="heat-cell heat-val" data-hc="${esc(reg+"|"+pr)}" tabindex="0" style="background:${cellColor(d.pct)};opacity:${op.toFixed(2)}" aria-label="${esc(reg)} / ${esc(pr)} \u2014 peak ${d.pct.toFixed(0)}%">${d.pct.toFixed(0)}</div>`;
     }).join("");
-    return `<div class="heat-cell heat-rowlab">${regionFlagHtml(reg)}<span>${esc(reg)}</span></div>` + cellsH;
+    return `<div class="heat-cell heat-rowlab">${regionFlagHtml(reg)}<span>${esc(regionLabel(reg))}</span></div>` + cellsH;
   }).join("");
   $("heatWrap").style.setProperty("--heat-cols", provs.length + 1);
   $("heatWrap").innerHTML = head + body;
@@ -4796,7 +4802,7 @@ function buildInsights(){
     crownHtml = `<div class="ins-scroll"><table class="ins-tbl"><thead><tr>${th("Family","ic-table")}${th("Region","ic-place")}${th("Used / Limit","ic-bolt","num")}${th("% used","ic-chart","num")}</tr></thead><tbody>` +
       ins.atRiskBlocked.slice(0, 20).map(r => `<tr>
         <td><span class="res-key">${esc(r.key)}</span> <span class="sku-pill blocked" title="${esc(BLOCKED_TIP)}">${icon("ic-error")} Blocked</span></td>
-        <td>${regionFlagHtml(r.region)}<span class="region-tag">${esc(r.region)}</span></td>
+        <td>${regionFlagHtml(r.region)}<span class="region-tag">${esc(regionLabel(r.region))}</span></td>
         <td class="num">${insUsedBar(r.current, r.limit)}</td>
         <td class="num"><span class="pct-badge crit">${r.pct.toFixed(0)}%</span></td>
       </tr>`).join("") + `</tbody></table></div>`;
@@ -4847,7 +4853,7 @@ function wireRollup(rollMap){
     const top = arr.slice(0, 5);
     const rowsH = top.map(x => {
       const pc = Math.round(x.v/total*100);
-      const lab = useSub ? esc(x.k) : (regionFlagHtml(x.k) + `<span class="conc-reg">${esc(x.k)}</span>`);
+      const lab = useSub ? esc(x.k) : (regionFlagHtml(x.k) + `<span class="conc-reg">${esc(regionLabel(x.k))}</span>`);
       const blk = (!useSub && o.blockedRegions && o.blockedRegions[x.k]) ? ` <span class="rp-blk" title="SKU-blocked in this region">${icon("ic-error")}</span>` : "";
       return `<div class="rp-row"><div class="rp-lab">${lab}${blk}</div><div class="rp-bar"><span style="width:${Math.max(3,pc)}%"></span></div><div class="rp-val">${fmt(x.v)} <em>${pc}%</em></div></div>`;
     }).join("");
@@ -4926,7 +4932,7 @@ function drawRequests(){
       return `<tr>
         <td><span class="req-state ${stCls(q.state)}">${icon(stIcon(q.state))} ${esc(q.state)}</span></td>
         <td><span class="res-key" title="${esc(q.sub||"")}">${esc(subLabel(q.sub))}</span></td>
-        <td><span class="region-tag">${esc(q.rp.replace("Microsoft.",""))} / ${esc(q.region)}</span></td>
+        <td><span class="region-tag">${esc(q.rp.replace("Microsoft.",""))} / ${esc(regionLabel(q.region))}</span></td>
         <td>${res}</td>
         <td class="num-cell">${lim}</td>
         <td style="white-space:nowrap">${esc(when)}</td>
@@ -4997,7 +5003,7 @@ function rowHtml(r){
   return `<tr${isNew?' class="row-new"':""}>
     ${subCell}
     <td class="col-provider"><span class="pill p-${r.provider}">${icon(provIcon[r.provider]||"ic-widgets")} ${r.provider === "appservice" ? "App Service (Preview)" : r.provider}</span></td>
-    <td class="col-region"><span class="region-tag">${esc(r.region)}</span></td>
+    <td class="col-region"><span class="region-tag">${esc(regionLabel(r.region))}</span></td>
     <td class="col-label"><div class="res-name">${esc(r.label)}${isNew?' <span class="new-tag">NEW</span>':""}${skuPills(r)}</div><div class="res-key">${esc(r.key)}</div></td>
     <td class="num-cell col-current">${fmt(r.current)}${deltaHtml(r.current, prev?prev.current:null)}</td>
     <td class="num-cell col-limit">${hasKnownLimit(r)?fmt(r.limit):"\u2014"}${deltaHtml(r.limit, prev?prev.limit:null)}</td>
@@ -5066,7 +5072,7 @@ function drawRows(){
         const peak = items.reduce((m,r) => r.limit>0 && r.pct>m ? r.pct : m, 0);
         const crit = items.filter(r => r.limit>0 && r.pct>=90).length;
         const regExp = quotaExpandedRegions.has(sk + "\n" + rk);
-        q.push(`<tr class="group-row group-region${regExp?'':' collapsed'}" data-grp="region" data-sub="${esc(sk)}" data-region="${esc(rk)}"><td colspan="${colspan}"><span class="grp-caret">${regExp?"\u25BC":"\u25B6"}</span>${icon("ic-place")} <b>${esc(rk)}</b>
+        q.push(`<tr class="group-row group-region${regExp?'':' collapsed'}" data-grp="region" data-sub="${esc(sk)}" data-region="${esc(rk)}"><td colspan="${colspan}"><span class="grp-caret">${regExp?"\u25BC":"\u25B6"}</span>${icon("ic-place")} <b>${esc(regionLabel(rk))}</b>
           <span class="group-meta">${items.length} metric(s) &middot; peak ${peak.toFixed(0)}%${crit?` &middot; <span class="pct-badge crit">${crit} critical</span>`:""}</span></td></tr>`);
         if(!regExp) return;
         items.forEach(r => q.push(rowHtml(r)));
@@ -5315,13 +5321,13 @@ function buildPlatformReportHtml(){
   const view = platformCurrentView();
   const when = new Date().toLocaleString();
   const rowsHtml = view.map(row => `<tr>
-    <td>${esc(row.sub)}</td><td>${esc(row.providerLabel)}</td><td>${esc(row.region)}</td><td>${esc(row.scope)}</td>
+    <td>${esc(row.sub)}</td><td>${esc(row.providerLabel)}</td><td>${esc(regionLabel(row.region))}</td><td>${esc(row.scope)}</td>
     <td><b>${esc(row.label)}</b><small>${esc(row.key)}</small></td><td class="n">${fmt(row.current)}</td>
     <td class="n">${row.unlimited ? "Unlimited" : (row.limit != null ? fmt(row.limit) : "\u2014")}</td>
     <td class="n">${row.remaining == null ? "\u2014" : fmt(row.remaining)}</td>
     <td class="n">${row.pct == null ? "\u2014" : `${row.pct.toFixed(1)}%`}</td><td>${esc(row.unit)}</td>
   </tr>`).join("");
-  const failuresHtml = platformFailures.length ? `<section><h2>Endpoint failures</h2><table><thead><tr><th>Provider</th><th>Region</th><th>Subscription</th><th>Scope</th><th>Status</th><th>Reason</th></tr></thead><tbody>${platformFailures.map(f => `<tr><td>${esc(PLATFORM_APIS[f.provider]?.label || f.provider)}</td><td>${esc(f.region)}</td><td>${esc(f.sub)}</td><td>${esc(f.scope)}</td><td>${esc(f.status)}</td><td>${esc(f.error)}</td></tr>`).join("")}</tbody></table></section>` : "";
+  const failuresHtml = platformFailures.length ? `<section><h2>Endpoint failures</h2><table><thead><tr><th>Provider</th><th>Region</th><th>Subscription</th><th>Scope</th><th>Status</th><th>Reason</th></tr></thead><tbody>${platformFailures.map(f => `<tr><td>${esc(PLATFORM_APIS[f.provider]?.label || f.provider)}</td><td>${esc(regionLabel(f.region))}</td><td>${esc(f.sub)}</td><td>${esc(f.scope)}</td><td>${esc(f.status)}</td><td>${esc(f.error)}</td></tr>`).join("")}</tbody></table></section>` : "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Azure Platform-Service Quotas</title><style>
   :root{font-family:"Segoe UI",Arial,sans-serif;color:#242424;background:#f5f5f5}body{margin:0;padding:28px}main{max-width:1500px;margin:auto;background:#fff;border:1px solid #ddd;border-radius:8px;padding:24px}h1{font-size:24px;margin:0 0 6px}h2{font-size:17px;margin:26px 0 8px}.meta{color:#616161;margin-bottom:18px}.note{padding:10px 12px;background:#f3f2f1;border-left:3px solid #0078d4;margin-bottom:18px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:7px 8px;border-bottom:1px solid #e1dfdd;text-align:left;vertical-align:top}th{background:#f3f2f1;white-space:nowrap}.n{text-align:right;font-variant-numeric:tabular-nums}small{display:block;color:#777;margin-top:2px}section{overflow-x:auto}@media print{body{padding:0;background:#fff}main{border:0}}</style></head><body><main>
   <h1>Azure Platform-Service Quota &amp; Usage</h1><div class="meta">Generated ${esc(when)} &middot; ${fmt(view.length)} displayed quota counter(s)</div>
@@ -6011,7 +6017,7 @@ ${mainSections}
 <button id="b2t" class="b2t" title="Back to top">&#8593;</button>
 <footer>Version ${esc(APP_VERSION)} &middot; Generated by the Azure Quota &amp; Usage Report tool &middot; data from <code>management.azure.com</code> &middot; Portal-equivalent.</footer>
 <script id="rdata-gz" type="text/plain">${gz}<\/script>
-<script>(${reportScript()})()<\/script>
+<script>(${reportScript()})(${JSON.stringify(PREVIEW_REGIONS)})<\/script>
 </body></html>`;
 }
 
@@ -6020,8 +6026,9 @@ function reportScript(){
 }
 
 /* Self-contained report runtime. Embedded via reportMain.toString() and executed as an IIFE. */
-function reportMain(){
+function reportMain(previewRegions){
   "use strict";
+  function regionLabel(r){ return r + (previewRegions.indexOf(r) !== -1 ? " (Preview)" : ""); }
   var provIcon={compute:"ic-widgets",network:"ic-cloud",storage:"ic-storage",quota:"ic-tune",appservice:"ic-cloud"};
   var provLbl={compute:"Compute",network:"Network",storage:"Storage",quota:"Quota",appservice:"App Service (Preview)"};
   function hasKnownLimit(r){return r.limit>0||(r.provider==="appservice"&&r.limit===0);}
@@ -6122,6 +6129,7 @@ function reportMain(){
     mark(); setupVmTooltip.mark=mark;
   }
   var FLAG_DATA = {
+  tw:"iVBORw0KGgoAAAANSUhEUgAAACgAAAAbCAMAAAA5zj1cAAAAPFBMVEX+AAAAAJSAAEqbm9YNDZm2tuH+/v8uLqdOTrQ/P651dcUeHqBtbcHBwebs7PeBAUrn5/Tm5vTT0+3Q0OxOVgUiAAAAaUlEQVQ4y+2RSwqAMAxEq5NpE+vf+9/VunClkgoufQSyeQwkE5obwh1vxdSkMjUi+56+KJ1iGKCdeImJc4zLGfksGhgLhHmJGYeI7B4DchxJuMeIbMBalvseM1XTqmayfFTh1F4JPz817I2ZAvisYi9BAAAAAElFTkSuQmCC",
   au:"iVBORw0KGgoAAAANSUhEUgAAACgAAAAUCAMAAADImI+JAAAAdVBMVEUBIWn+/v8LKm8rRoLsS2lZa5sCI2rkACvAyNojP317jLGrtc2qtc3FzN1fc6FBWY/5w83ecIr+8vQRL3P5x9DY3ejU2OVeZpZLVIn709oYNndNZJacqcWLmrra3unVZ4Xy9Pj22uFEXJHIz94VM3XUZYPb3+rlcwqvAAAAz0lEQVQoz7WQyRKDIBBEB2STRHHfTdQs//+JQVxiSlNFDunLAPOomW4gycVnAHDi/KwLoyEJ4EjFgyQpXcBcY54C+IpmdAQNNmxavv8+C62sLyPEeVRGXTbelx72BF5BfqC16bpgB25lRnd6KucoKvuP0UaOdObT4CUkzEczNA3ItZheq2oxhKYUlMHmeNiK4ps3+7jXzFSN0W3g/jMgY5WSwS+i1BLcBrS4c6x+xrJpZGxDtgi1NpwSCAlls44rxG5vfEnxHozjvUFaw//0ApepC3HnUeodAAAAAElFTkSuQmCC",
   in:"iVBORw0KGgoAAAANSUhEUgAAACgAAAAbBAMAAAD8PtBdAAAAMFBMVEUEajj/aCD////f3/GpqNhPTa7MzOiOjMthX7f5+fxubLyFg8b4+Py+veF1dMD9/f41r+HyAAAATElEQVQoz2MQxAIYhoqgEhRoloZPgrHhgqZuKcEYgotNnK3QBfXb/J5koAsq722NuG2Ern2Z95YsDDOLTZzNMQRPuKX0YAiiuHMoAwA5/S6KfoLQ6QAAAABJRU5ErkJggg==",
   hk:"iVBORw0KGgoAAAANSUhEUgAAACgAAAAbCAMAAAA5zj1cAAAAVFBMVEXuHCX1eH794+T3mJzyU1rxRUv2io7/////+fn//v7uJC32g4j7vsH5pqn6t7rwOkL81dfzXGL/9PX0bnT3kJX7y8393N3+7e71fYLzY2nwNT35sLPTyISVAAAAmUlEQVQYGe3B13XDMBAEwEXcOyQSzJb679NugBC/9TyDbzeZjieycsIDQUmPBxyrVnwQABS7MPacPe75eWs/zcq188+ccKeTIpdcUeczkxF3JtXK1Znc3xSJBrccRawPoRlXPEaM1aOG1S024YOw+lZWXSrGXgsp+1sOTRiKdMp4SqPHSD94sqRNyAkjYZfZAHjZgme2hH/AL5JVBleYonGCAAAAAElFTkSuQmCC",
@@ -6154,7 +6162,7 @@ function reportMain(){
   mx:"iVBORw0KGgoAAAANSUhEUgAAACgAAAAXCAMAAABODP0nAAAAh1BMVEUAaEfOESb///+qzMHvrrXR0rWKYUHe4dHy7+fW069pPyP8/PnBxKJwra/ur7a2upL19ezm28vRtKOng3HIrHHnzserlmmSblSgelzQ6OJRkpB4VDxkRjXDs4r889m4296Bp6mfZj9/Tie5r6i7083Dtq7b2MLcwpGUlI+Ogmu5iVulyszYwIRdbSBmAAAAfElEQVQoz+XTtxbCMAxAUUMid+P0XihpkPz/92U1A0dkzpvvIh2JEDfv6nS7uJHf0D8TVGH0oOkfUCQfKiVHYTe1RSOfMQYD1c60LmiuEKhTveVNPb4sAsVgljV7xyEgkENpqsrcgWHDMCiTrBeAr4drFtngbNdzHH5/4Q77sAk1toKo3AAAAABJRU5ErkJggg==",
   us:"iVBORw0KGgoAAAANSUhEUgAAACgAAAAVBAMAAADGNLEtAAAALVBMVEX////GU3LZjKGzGUINM2PsxtAYPWotT3hed5enma46WoBPa46zGkMkR3Jrgp+6ntXWAAAAiklEQVQY02Nwc0lJcQMSxghgw+CRVdaWkVXWooQEGFxaPLxKWjxcGJCBn1fJExAWRAJglUuAKlEEPdyXgA1A0e62LTu9bFt2CopF3iCh9LItKE5yX5tVe31tVgmq9pL0NLcy95RQJMAAdiUQo2ifCQUoKrECY0xgw6CEBWDXLogFYBfECrBahM1JAItMTcEiMDpsAAAAAElFTkSuQmCC"
 };
-  var REGION_CC={australiacentral:"AU",australiacentral2:"AU",australiaeast:"AU",australiasoutheast:"AU",centralindia:"IN",indiasouthcentral:"IN",southindia:"IN",westindia:"IN",eastasia:"HK",indonesiacentral:"ID",japaneast:"JP",japanwest:"JP",koreacentral:"KR",koreasouth:"KR",malaysiawest:"MY",newzealandnorth:"NZ",austriaeast:"AT",belgiumcentral:"BE",denmarkeast:"DK",francecentral:"FR",francesouth:"FR",germanynorth:"DE",germanywestcentral:"DE",italynorth:"IT",northeurope:"IE",norwayeast:"NO",norwaywest:"NO",polandcentral:"PL",spaincentral:"ES",swedencentral:"SE",swedensouth:"SE",switzerlandnorth:"CH",switzerlandwest:"CH",uksouth:"GB",ukwest:"GB",westeurope:"NL",israelcentral:"IL",qatarcentral:"QA",uaecentral:"AE",uaenorth:"AE",southafricanorth:"ZA",southafricawest:"ZA",brazilsouth:"BR",brazilsoutheast:"BR",canadacentral:"CA",canadaeast:"CA",chilecentral:"CL",mexicocentral:"MX",centralus:"US",eastus:"US",eastus2:"US",northcentralus:"US",southcentralus:"US",westcentralus:"US",westus:"US",westus2:"US",westus3:"US"};
+  var REGION_CC={australiacentral:"AU",australiacentral2:"AU",australiaeast:"AU",australiasoutheast:"AU",centralindia:"IN",indiasouthcentral:"IN",southindia:"IN",westindia:"IN",eastasia:"HK",indonesiacentral:"ID",japaneast:"JP",japanwest:"JP",koreacentral:"KR",koreasouth:"KR",malaysiawest:"MY",southeastasia3:"MY",newzealandnorth:"NZ",taiwannorth:"TW",austriaeast:"AT",belgiumcentral:"BE",denmarkeast:"DK",francecentral:"FR",francesouth:"FR",germanynorth:"DE",germanywestcentral:"DE",italynorth:"IT",northeurope:"IE",norwayeast:"NO",norwaywest:"NO",polandcentral:"PL",spaincentral:"ES",swedencentral:"SE",swedensouth:"SE",switzerlandnorth:"CH",switzerlandwest:"CH",uksouth:"GB",ukwest:"GB",westeurope:"NL",israelcentral:"IL",qatarcentral:"QA",uaecentral:"AE",uaenorth:"AE",southafricanorth:"ZA",southafricawest:"ZA",brazilsouth:"BR",brazilsoutheast:"BR",canadacentral:"CA",canadaeast:"CA",chilecentral:"CL",mexicocentral:"MX",centralus:"US",eastus:"US",eastus2:"US",northcentralus:"US",southcentralus:"US",westcentralus:"US",westus:"US",westus2:"US",westus3:"US"};
   var ASEAN_SVG="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='11.5' fill='%23fff'/%3E%3Ccircle cx='12' cy='12' r='9.5' fill='%23ce1126'/%3E%3Cg stroke='%23f7d000' stroke-width='1.1' stroke-linecap='round'%3E%3Cpath d='M12 6.5v11'/%3E%3Cpath d='M8.9 7.2l6.2 9.6'/%3E%3Cpath d='M15.1 7.2L8.9 16.8'/%3E%3Cpath d='M6.8 9.3l10.4 5.4'/%3E%3Cpath d='M17.2 9.3L6.8 14.7'/%3E%3C/g%3E%3C/svg%3E";
   function regionFlag(r){
     if(r==="southeastasia")return '<img class="rflag rflag-sq" src="'+ASEAN_SVG+'" alt="ASEAN" title="ASEAN / Singapore" />';
@@ -6165,7 +6173,7 @@ function reportMain(){
   }
   function regCell(region,cls){
     var f=regionFlag(region);
-    return '<span class="regcell">'+(f?f:'<span class="rflag-none"></span>')+'<span class="'+(cls||"mono muted")+'">'+esc(region)+'</span></span>';
+    return '<span class="regcell">'+(f?f:'<span class="rflag-none"></span>')+'<span class="'+(cls||"mono muted")+'">'+esc(regionLabel(region))+'</span></span>';
   }
 
   var PANELS=[];
@@ -6185,7 +6193,7 @@ function reportMain(){
   }
 
   /* ---- reusable multiselect checkbox dropdown with search ---- */
-  function makeMsdd(btn, values, onChange){
+  function makeMsdd(btn, values, onChange, valueLabel){
     var sel={}; values.forEach(function(v){sel[v]=true;});
     var avail=values.slice();               // values currently selectable given other columns' filters
     var availSet={}; avail.forEach(function(v){availSet[v]=1;});
@@ -6200,9 +6208,9 @@ function reportMain(){
     function recount(){ btn.classList.toggle("on", isActive()); }
     function paint(){
       var q=search.value.trim().toLowerCase();
-      var shown=avail.filter(function(v){return !q||v.toLowerCase().indexOf(q)>=0;});
+      var shown=avail.filter(function(v){return !q||(valueLabel?valueLabel(v):v).toLowerCase().indexOf(q)>=0;});
       var html=shown.map(function(v){
-        return '<label><input type="checkbox" data-v="'+esc(v)+'" '+(sel[v]===false?"":"checked")+'/><span>'+esc(v)+'</span></label>';
+        return '<label><input type="checkbox" data-v="'+esc(v)+'" '+(sel[v]===false?"":"checked")+'/><span>'+esc(valueLabel?valueLabel(v):v)+'</span></label>';
       }).join("");
       list.innerHTML=html||'<div class="muted" style="padding:6px">No matching values for the current filters</div>';
     }
@@ -6266,7 +6274,7 @@ function reportMain(){
       if(c.filter){
         var getV=c.filterVal||function(r){return String(c.get(r));};
         var vals=uniq(data.map(getV)).sort(function(a,b){return a<b?-1:a>b?1:0;});
-        var f=makeMsdd(th.querySelector(".fbtn"), vals, function(){paint();});
+        var f=makeMsdd(th.querySelector(".fbtn"), vals, function(){paint();}, c.key==="region"?regionLabel:null);
         f._val=getV;
         filterers[c.key]=f;
       }
@@ -6476,7 +6484,7 @@ function reportMain(){
           var op=(0.20+Math.min(1,d/100)*0.80).toFixed(2);
           return '<div class="hcell hval" data-hc="'+esc(reg+"|"+pr)+'" tabindex="0" style="background:'+hc(d)+';opacity:'+op+'" aria-label="'+esc(reg)+' / '+esc(pr)+' \u2014 peak '+d.toFixed(0)+'%">'+d.toFixed(0)+'</div>';
         }).join("");
-        return '<div class="hcell hrow">'+regionFlag(reg)+'<span>'+esc(reg)+'</span></div>'+cells;
+        return '<div class="hcell hrow">'+regionFlag(reg)+'<span>'+esc(regionLabel(reg))+'</span></div>'+cells;
       }).join("");
       grid.innerHTML=head+body;
       setupHeatTip();
@@ -6559,7 +6567,7 @@ function reportMain(){
       columns:[
         {key:"state",label:"Status",icon:"ic-schedule",filter:1,get:function(r){return r.state;},cell:function(r){return '<td><span class="rst '+stCls(r.state)+'">'+icon(stIcon(r.state),13)+" "+esc(r.state)+'</span></td>';}},
         {key:"subName",label:"Subscription",icon:"ic-key",filter:1,get:function(r){return r.subName;},cell:function(r){return '<td><span class="rk" title="'+esc(r.subId)+'">'+esc(r.subName)+'</span></td>';}},
-        {key:"scope",label:"Scope / Region",icon:"ic-cloud",filter:1,get:function(r){return r.scope;},cell:function(r){return '<td><span class="regcell"><span class="mono muted">'+esc(r.rp)+' /</span>'+(r.region?regionFlag(r.region):'')+'<span class="mono muted">'+esc(r.region)+'</span></span></td>';}},
+        {key:"scope",label:"Scope / Region",icon:"ic-cloud",filter:1,get:function(r){return r.scope;},cell:function(r){return '<td><span class="regcell"><span class="mono muted">'+esc(r.rp)+' /</span>'+(r.region?regionFlag(r.region):'')+'<span class="mono muted">'+esc(regionLabel(r.region))+'</span></span></td>';}},
         {key:"res",label:"Requested resource(s)",icon:"ic-table",filter:1,get:function(r){return r.res;},cell:function(r){return '<td>'+r.resHtml+'</td>';}},
         {key:"lim",label:"New limit",icon:"ic-shield",num:1,sortable:false,cell:function(r){return '<td class="num">'+r.limHtml+'</td>';}},
         {key:"sub",label:"Submitted",icon:"ic-schedule",filter:1,filterVal:function(r){return r.subTxt;},sortVal:function(r){return r.sub;},get:function(r){return r.subTxt;},cell:function(r){return '<td style="white-space:nowrap">'+esc(r.subTxt)+'</td>';}}
@@ -6602,7 +6610,7 @@ function reportMain(){
   var RGEO={
     AMER:["brazilsouth","brazilsoutheast","canadacentral","canadaeast","centralus","chilecentral","eastus","eastus2","mexicocentral","northcentralus","southcentralus","westcentralus","westus","westus2","westus3"],
     EMEA:["austriaeast","belgiumcentral","denmarkeast","francecentral","francesouth","germanynorth","germanywestcentral","italynorth","northeurope","norwayeast","norwaywest","polandcentral","spaincentral","swedencentral","swedensouth","switzerlandnorth","switzerlandwest","uksouth","ukwest","westeurope","israelcentral","qatarcentral","uaecentral","uaenorth","southafricanorth","southafricawest"],
-    APAC:["australiacentral","australiacentral2","australiaeast","australiasoutheast","centralindia","eastasia","indiasouthcentral","indonesiacentral","japaneast","japanwest","koreacentral","koreasouth","malaysiawest","newzealandnorth","southeastasia","southindia","westindia"]
+    APAC:["australiacentral","australiacentral2","australiaeast","australiasoutheast","centralindia","eastasia","indiasouthcentral","indonesiacentral","japaneast","japanwest","koreacentral","koreasouth","malaysiawest","newzealandnorth","southeastasia","southeastasia3","southindia","taiwannorth","westindia"]
   };
   var RGEO_FULL={ AMER:"Americas", EMEA:"Europe, Middle East & Africa", APAC:"Asia Pacific", Other:"Other regions" };
   function rgeoOf(r){ for(var g in RGEO){ if(RGEO[g].indexOf(r)>=0) return g; } return "Other"; }
@@ -6610,7 +6618,7 @@ function reportMain(){
     var groups={}; regions.forEach(function(r){ var g=rgeoOf(r); (groups[g]=groups[g]||[]).push(r); });
     var order=["AMER","EMEA","APAC","Other"];
     return order.filter(function(g){return groups[g]&&groups[g].length;}).map(function(g){
-      return '<optgroup label="'+esc(RGEO_FULL[g]||g)+'">'+groups[g].sort().map(function(r){return '<option value="'+esc(r)+'"'+(r===selected?" selected":"")+'>'+esc(r)+'</option>';}).join("")+'</optgroup>';
+      return '<optgroup label="'+esc(RGEO_FULL[g]||g)+'">'+groups[g].sort().map(function(r){return '<option value="'+esc(r)+'"'+(r===selected?" selected":"")+'>'+esc(regionLabel(r))+'</option>';}).join("")+'</optgroup>';
     }).join("");
   }
   function planStatusPill(r){
@@ -6991,7 +6999,7 @@ function reportMain(){
     maps.forEach(function(m){ if(!seen[m.region]){ seen[m.region]=1; regions.push(m.region); } });
     regions.sort();
     if(zoneRegionSel==null || regions.indexOf(zoneRegionSel)<0) zoneRegionSel=regions[0];
-    var sel='<label class="plan-sel"><span class="psel-lab">'+icon("ic-place",13)+' Region</span><select id="zoneRegionSel">'+regions.map(function(rg){return '<option value="'+esc(rg)+'"'+(rg===zoneRegionSel?" selected":"")+'>'+esc(rg)+'</option>';}).join("")+'</select></label>';
+    var sel='<label class="plan-sel"><span class="psel-lab">'+icon("ic-place",13)+' Region</span><select id="zoneRegionSel">'+regions.map(function(rg){return '<option value="'+esc(rg)+'"'+(rg===zoneRegionSel?" selected":"")+'>'+esc(regionLabel(rg))+'</option>';}).join("")+'</select></label>';
     var toolbar='<div class="plan-toolbar">'+sel+'<span class="muted" style="font-size:12px">Azure numbers logical zones (1, 2, 3) independently per subscription \u2014 the physical zone each maps to can differ between subscriptions.</span></div>';
     var subsHere=maps.filter(function(m){return m.region===zoneRegionSel;});
     var rowsH=subsHere.map(function(zm){
